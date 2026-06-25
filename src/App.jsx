@@ -1,0 +1,856 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown } from "lucide-react";
+
+// ============================================================
+// CONFIGURA AQUÍ TUS CLAVES DE SUPABASE
+// ============================================================
+const SUPABASE_URL = "https://skozlrpdjoxbvzgjumzz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_8CrcBtHiApBXq22DeDru7g_UpTET0GM";
+// ============================================================
+
+const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#111827"];
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+// ---- Mini cliente REST para Supabase (sin librerías externas) ----
+function makeSupabase(url, key) {
+  let accessToken = null;
+  let refreshToken = null;
+
+  const authHeaders = () => ({
+    "Content-Type": "application/json",
+    apikey: key,
+    Authorization: `Bearer ${accessToken || key}`,
+  });
+
+  return {
+    setSession(session) {
+      accessToken = session?.access_token || null;
+      refreshToken = session?.refresh_token || null;
+    },
+    getRefreshToken() { return refreshToken; },
+
+    async signInWithOtp(email) {
+      const res = await fetch(`${url}/auth/v1/otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: key },
+        body: JSON.stringify({ email, create_user: true }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error_description || "Error al enviar el código");
+      return true;
+    },
+
+    async verifyOtp(email, token) {
+      const res = await fetch(`${url}/auth/v1/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: key },
+        body: JSON.stringify({ email, token, type: "email" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error_description || data.msg || "Código incorrecto");
+      return data;
+    },
+
+    async refreshSession(rToken) {
+      const res = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: key },
+        body: JSON.stringify({ refresh_token: rToken }),
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+
+    async getUser() {
+      const res = await fetch(`${url}/auth/v1/user`, { headers: authHeaders() });
+      if (!res.ok) return null;
+      return res.json();
+    },
+
+    async signOut() {
+      try { await fetch(`${url}/auth/v1/logout`, { method: "POST", headers: authHeaders() }); } catch (e) {}
+      accessToken = null; refreshToken = null;
+    },
+
+    async select(table, query = "") {
+      const res = await fetch(`${url}/rest/v1/${table}?${query}`, { headers: authHeaders() });
+      if (!res.ok) throw new Error(`Error leyendo ${table}`);
+      return res.json();
+    },
+    async insert(table, payload) {
+      const res = await fetch(`${url}/rest/v1/${table}`, {
+        method: "POST",
+        headers: { ...authHeaders(), Prefer: "return=representation" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Error creando en ${table}`);
+      return res.json();
+    },
+    async update(table, id, payload) {
+      const res = await fetch(`${url}/rest/v1/${table}?id=eq.${id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), Prefer: "return=representation" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Error actualizando ${table}`);
+      return res.json();
+    },
+    async remove(table, id) {
+      const res = await fetch(`${url}/rest/v1/${table}?id=eq.${id}`, { method: "DELETE", headers: authHeaders() });
+      if (!res.ok) throw new Error(`Error eliminando en ${table}`);
+      return true;
+    },
+  };
+}
+
+const sb = makeSupabase(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ---- Guardado del token de sesión en el navegador del usuario ----
+const TOKEN_KEY = "padel-coach-refresh-token";
+const sessionStore = {
+  get() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } },
+  set(v) { try { localStorage.setItem(TOKEN_KEY, v); } catch (e) {} },
+  clear() { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} },
+};
+
+export default function App() {
+  const [authState, setAuthState] = useState("loading");
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+
+  const [folders, setFolders] = useState([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [dataError, setDataError] = useState("");
+  const [view, setView] = useState({ screen: "home" });
+  const [tool, setTool] = useState("select");
+  const [color, setColor] = useState(COLORS[0]);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [modal, setModal] = useState(null);
+  const [inputValue, setInputValue] = useState("");
+  const [selectedArrowId, setSelectedArrowId] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = sessionStore.get();
+        if (stored) {
+          const session = await sb.refreshSession(stored);
+          if (session?.access_token) {
+            sb.setSession(session);
+            sessionStore.set(session.refresh_token);
+            const u = await sb.getUser();
+            if (u && !u.error) { setUser(u); setAuthState("signedIn"); return; }
+          }
+        }
+      } catch (e) {}
+      setAuthState("signedOut");
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (authState !== "signedIn") return;
+    (async () => {
+      try {
+        setDataError("");
+        const [fRows, pRows] = await Promise.all([
+          sb.select("folders", "select=id,name,created_at&order=created_at.asc"),
+          sb.select("projects", "select=id,folder_id,name,sport,notes,arrows,strokes,created_at&order=created_at.asc"),
+        ]);
+        const merged = fRows.map(f => ({
+          id: f.id,
+          name: f.name,
+          createdAt: f.created_at,
+          projects: pRows.filter(p => p.folder_id === f.id).map(p => ({
+            id: p.id, name: p.name, sport: p.sport || "padel", notes: p.notes || "",
+            arrows: p.arrows || [], strokes: p.strokes || [], createdAt: p.created_at,
+          })),
+        }));
+        setFolders(merged);
+        setDataLoaded(true);
+      } catch (e) {
+        setDataError("No se pudieron cargar tus datos. Comprueba tu conexión e inténtalo de nuevo.");
+        setDataLoaded(true);
+      }
+    })();
+  }, [authState]);
+
+  const sendCode = async () => {
+    setAuthError("");
+    if (!email.trim() || !email.includes("@")) { setAuthError("Introduce un email válido."); return; }
+    setAuthBusy(true);
+    try { await sb.signInWithOtp(email.trim()); setAuthState("awaitingCode"); }
+    catch (e) { setAuthError(e.message); }
+    finally { setAuthBusy(false); }
+  };
+
+  const confirmCode = async () => {
+    setAuthError("");
+    if (!code.trim()) { setAuthError("Introduce el código que recibiste por email."); return; }
+    setAuthBusy(true);
+    try {
+      const session = await sb.verifyOtp(email.trim(), code.trim());
+      sb.setSession(session);
+      sessionStore.set(session.refresh_token);
+      setUser(session.user);
+      setAuthState("signedIn");
+    } catch (e) { setAuthError(e.message); }
+    finally { setAuthBusy(false); }
+  };
+
+  const doSignOut = async () => {
+    await sb.signOut();
+    sessionStore.clear();
+    setUser(null); setFolders([]); setDataLoaded(false);
+    setView({ screen: "home" }); setEmail(""); setCode(""); setAuthError("");
+    setAuthState("signedOut");
+  };
+
+  const addFolder = async (name) => {
+    const tempId = uid();
+    setFolders(fs => [...fs, { id: tempId, name, projects: [], createdAt: Date.now() }]);
+    try {
+      const [row] = await sb.insert("folders", { name, user_id: user.id });
+      setFolders(fs => fs.map(f => f.id === tempId ? { ...f, id: row.id } : f));
+    } catch (e) { setDataError("No se pudo guardar la carpeta en el servidor."); }
+  };
+
+  const addProject = async (folderId, name, sport) => {
+    const tempId = uid();
+    const blank = { id: tempId, name, sport, notes: "", arrows: [], strokes: [], createdAt: Date.now() };
+    setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: [...f.projects, blank] } : f));
+    try {
+      const [row] = await sb.insert("projects", { folder_id: folderId, user_id: user.id, name, sport, notes: "", arrows: [], strokes: [] });
+      setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: f.projects.map(p => p.id === tempId ? { ...p, id: row.id } : p) } : f));
+    } catch (e) { setDataError("No se pudo guardar el proyecto en el servidor."); }
+  };
+
+  const deleteFolder = async (folderId) => {
+    setFolders(fs => fs.filter(f => f.id !== folderId));
+    setView({ screen: "home" });
+    try { await sb.remove("folders", folderId); } catch (e) { setDataError("No se pudo eliminar en el servidor."); }
+  };
+
+  const deleteProject = async (folderId, projectId) => {
+    setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: f.projects.filter(p => p.id !== projectId) } : f));
+    setView({ screen: "folder", folderId });
+    try { await sb.remove("projects", projectId); } catch (e) { setDataError("No se pudo eliminar en el servidor."); }
+  };
+
+  const renameFolder = async (folderId, name) => {
+    setFolders(fs => fs.map(f => f.id === folderId ? { ...f, name } : f));
+    try { await sb.update("folders", folderId, { name }); } catch (e) { setDataError("No se pudo renombrar en el servidor."); }
+  };
+
+  const renameProject = async (folderId, projectId, name) => {
+    setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: f.projects.map(p => p.id === projectId ? { ...p, name } : p) } : f));
+    try { await sb.update("projects", projectId, { name }); } catch (e) { setDataError("No se pudo renombrar en el servidor."); }
+  };
+
+  const projectSaveTimers = useRef({});
+  const updateProject = useCallback((folderId, projectId, updater) => {
+    setFolders(fs => fs.map(f => f.id === folderId ? {
+      ...f, projects: f.projects.map(p => p.id === projectId ? updater(p) : p)
+    } : f));
+
+    clearTimeout(projectSaveTimers.current[projectId]);
+    projectSaveTimers.current[projectId] = setTimeout(async () => {
+      setFolders(curr => {
+        const folder = curr.find(f => f.id === folderId);
+        const proj = folder?.projects.find(p => p.id === projectId);
+        if (proj) {
+          sb.update("projects", projectId, { notes: proj.notes, arrows: proj.arrows, strokes: proj.strokes })
+            .catch(() => setDataError("No se pudieron sincronizar los últimos cambios."));
+        }
+        return curr;
+      });
+    }, 600);
+  }, []);
+
+  const closeModal = () => { setModal(null); setInputValue(""); };
+  const confirmNewFolder = () => {
+    const val = inputValue.trim();
+    if (!val) return closeModal();
+    addFolder(val);
+    closeModal();
+  };
+  const confirmRename = () => {
+    const val = inputValue.trim();
+    if (!val) return closeModal();
+    if (modal.type === "renameFolder") renameFolder(modal.folderId, val);
+    if (modal.type === "renameProject") renameProject(modal.folderId, modal.projectId, val);
+    closeModal();
+  };
+  const confirmNewProject = (sport) => {
+    const val = inputValue.trim() || (sport === "padel" ? "Nueva pista de pádel" : "Nueva pista de tenis");
+    addProject(modal.folderId, val, sport);
+    closeModal();
+  };
+
+  const currentFolder = view.screen !== "home" ? folders.find(f => f.id === view.folderId) : null;
+  const currentProject = view.screen === "project" ? currentFolder?.projects.find(p => p.id === view.projectId) : null;
+
+  if (authState === "loading") {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-slate-50">
+        <Loader2 className="animate-spin text-emerald-500" size={28} />
+      </div>
+    );
+  }
+
+  if (authState === "signedOut" || authState === "awaitingCode") {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-slate-50 p-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 w-full max-w-sm">
+          <div className="flex items-center justify-center mb-4"><span className="text-3xl">🎾</span></div>
+          <h1 className="text-lg font-bold text-slate-800 text-center mb-1">Pádel & Tenis Coach</h1>
+          <p className="text-sm text-slate-500 text-center mb-6">Pizarras tácticas para entrenadores</p>
+
+          {authState === "signedOut" && (
+            <>
+              <label className="text-xs font-semibold text-slate-500 mb-1 block">Tu email</label>
+              <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 mb-3">
+                <Mail size={16} className="text-slate-400" />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && sendCode()} placeholder="tu@email.com" className="flex-1 text-sm outline-none" />
+              </div>
+              {authError && <p className="text-xs text-red-500 mb-3">{authError}</p>}
+              <button onClick={sendCode} disabled={authBusy}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2">
+                {authBusy ? <Loader2 size={16} className="animate-spin" /> : null}
+                Enviar código de acceso
+              </button>
+              <p className="text-xs text-slate-400 text-center mt-3">Te enviaremos un código de un solo uso, sin contraseñas.</p>
+            </>
+          )}
+
+          {authState === "awaitingCode" && (
+            <>
+              <p className="text-sm text-slate-600 mb-3">Hemos enviado un código a <strong>{email}</strong>. Revisa tu bandeja (y spam).</p>
+              <label className="text-xs font-semibold text-slate-500 mb-1 block">Código de 6 dígitos</label>
+              <input value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmCode()}
+                placeholder="123456" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:ring-2 focus:ring-emerald-400" />
+              {authError && <p className="text-xs text-red-500 mb-3">{authError}</p>}
+              <button onClick={confirmCode} disabled={authBusy}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 mb-2">
+                {authBusy ? <Loader2 size={16} className="animate-spin" /> : null}
+                Confirmar
+              </button>
+              <button onClick={() => { setAuthState("signedOut"); setCode(""); setAuthError(""); }} className="w-full text-slate-400 hover:text-slate-600 text-xs py-1">
+                Usar otro email
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full w-full bg-slate-50 flex flex-col font-sans">
+      {dataError && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-700 text-xs px-3 py-2 flex items-center justify-between">
+          <span>{dataError}</span>
+          <button onClick={() => setDataError("")} className="ml-2"><X size={14} /></button>
+        </div>
+      )}
+
+      {!dataLoaded && (
+        <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500" size={24} /></div>
+      )}
+
+      {dataLoaded && view.screen === "home" && (
+        <HomeScreen
+          folders={folders} userEmail={user?.email}
+          onOpenFolder={(id) => setView({ screen: "folder", folderId: id })}
+          onNewFolder={() => setModal({ type: "newFolder" })}
+          onDeleteFolder={deleteFolder}
+          onRenameFolder={(id, name) => { setModal({ type: "renameFolder", folderId: id }); setInputValue(name); }}
+          onSignOut={doSignOut}
+        />
+      )}
+
+      {dataLoaded && view.screen === "folder" && currentFolder && (
+        <FolderScreen
+          folder={currentFolder}
+          onBack={() => setView({ screen: "home" })}
+          onOpenProject={(id) => setView({ screen: "project", folderId: currentFolder.id, projectId: id })}
+          onNewProject={() => setModal({ type: "newProject", folderId: currentFolder.id, step: "choose" })}
+          onDeleteProject={(pid) => deleteProject(currentFolder.id, pid)}
+          onRenameProject={(pid, name) => { setModal({ type: "renameProject", folderId: currentFolder.id, projectId: pid }); setInputValue(name); }}
+        />
+      )}
+
+      {dataLoaded && view.screen === "project" && currentProject && (
+        <ProjectScreen
+          project={currentProject}
+          tool={tool} setTool={setTool} color={color} setColor={setColor}
+          showColorPicker={showColorPicker} setShowColorPicker={setShowColorPicker}
+          selectedArrowId={selectedArrowId} setSelectedArrowId={setSelectedArrowId}
+          onBack={() => { setSelectedArrowId(null); setView({ screen: "folder", folderId: currentFolder.id }); }}
+          onChange={(updater) => updateProject(currentFolder.id, currentProject.id, updater)}
+        />
+      )}
+
+      {modal?.type === "newFolder" && (
+        <Modal title="Nueva carpeta" value={inputValue} setValue={setInputValue} onConfirm={confirmNewFolder} onCancel={closeModal} />
+      )}
+      {(modal?.type === "renameFolder" || modal?.type === "renameProject") && (
+        <Modal title={modal.type === "renameFolder" ? "Renombrar carpeta" : "Renombrar proyecto"} value={inputValue} setValue={setInputValue} onConfirm={confirmRename} onCancel={closeModal} />
+      )}
+      {modal?.type === "newProject" && (
+        <NewProjectModal value={inputValue} setValue={setInputValue} onChoose={confirmNewProject} onCancel={closeModal} />
+      )}
+    </div>
+  );
+}
+
+// =============== HOME SCREEN ===============
+function HomeScreen({ folders, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
+  return (
+    <div className="flex-1 flex flex-col">
+      <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
+        <div>
+          <h1 className="text-lg font-bold text-slate-800 tracking-tight">🎾 Pádel & Tenis Coach</h1>
+          {userEmail && <p className="text-xs text-slate-400">{userEmail}</p>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onNewFolder} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">
+            <FolderPlus size={16} /> Carpeta
+          </button>
+          <button onClick={onSignOut} title="Cerrar sesión" className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600"><LogOut size={16} /></button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {folders.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 gap-2 py-16">
+            <Folder size={48} strokeWidth={1.5} />
+            <p className="text-sm">Todavía no tienes carpetas.</p>
+            <p className="text-xs">Crea una para empezar a organizar tus pizarras tácticas.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {folders.map(folder => (
+              <div key={folder.id} onClick={() => onOpenFolder(folder.id)}
+                className="group relative bg-white rounded-xl border border-slate-200 p-4 flex flex-col items-center gap-2 cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all">
+                <Folder size={36} className="text-emerald-500" strokeWidth={1.5} />
+                <span className="text-sm font-medium text-slate-700 text-center line-clamp-2">{folder.name}</span>
+                <span className="text-xs text-slate-400">{folder.projects.length} proyecto{folder.projects.length !== 1 ? "s" : ""}</span>
+                <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={(e) => { e.stopPropagation(); onRenameFolder(folder.id, folder.name); }} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-500"><Pencil size={12} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar la carpeta "${folder.name}" y todo su contenido?`)) onDeleteFolder(folder.id); }} className="p-1.5 bg-slate-100 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============== FOLDER SCREEN ===============
+function FolderScreen({ folder, onBack, onOpenProject, onNewProject, onDeleteProject, onRenameProject }) {
+  return (
+    <div className="flex-1 flex flex-col">
+      <header className="px-3 py-4 bg-white border-b border-slate-200 flex items-center gap-2 sticky top-0 z-10">
+        <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ArrowLeft size={18} /></button>
+        <h1 className="text-base font-bold text-slate-800 flex-1 truncate">{folder.name}</h1>
+        <button onClick={onNewProject} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">
+          <FilePlus size={16} /> Proyecto
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {folder.projects.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 gap-2 py-16">
+            <FilePlus size={48} strokeWidth={1.5} />
+            <p className="text-sm">Sin proyectos en esta carpeta.</p>
+            <p className="text-xs">Crea uno para empezar a dibujar tu táctica.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {folder.projects.map(project => (
+              <div key={project.id} onClick={() => onOpenProject(project.id)}
+                className="group relative bg-white rounded-xl border border-slate-200 overflow-hidden cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all">
+                <div className={`aspect-[4/5] flex items-center justify-center p-2 ${project.sport === "tenis" ? "bg-orange-50" : "bg-emerald-50"}`}>
+                  <MiniCourtPreview sport={project.sport} arrows={project.arrows} strokes={project.strokes} />
+                </div>
+                <div className="p-2 text-center">
+                  <span className="text-sm font-medium text-slate-700 line-clamp-1">{project.name}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-400 block">{project.sport === "tenis" ? "Tenis" : "Pádel"}</span>
+                </div>
+                <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={(e) => { e.stopPropagation(); onRenameProject(project.id, project.name); }} className="p-1.5 bg-white/90 hover:bg-slate-200 rounded-md text-slate-500 shadow-sm"><Pencil size={12} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar el proyecto "${project.name}"?`)) onDeleteProject(project.id); }} className="p-1.5 bg-white/90 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500 shadow-sm"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MiniCourtPreview({ sport, arrows, strokes }) {
+  return (
+    <svg viewBox="0 0 200 320" className="w-full h-full">
+      {sport === "tenis" ? <TennisCourtLines w={200} h={320} /> : <PadelCourtLines w={200} h={320} />}
+      {strokes.map(s => (
+        <polyline key={s.id} points={s.points.map(p => `${p.x * 200},${p.y * 320}`).join(" ")}
+          fill="none" stroke={s.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+      {arrows.map(a => (
+        <ArrowSvg key={a.id} x1={a.x1 * 200} y1={a.y1 * 320} x2={a.x2 * 200} y2={a.y2 * 320} color={a.color} strokeWidth={2} headSize={6} />
+      ))}
+    </svg>
+  );
+}
+
+// =============== COURT LINES ===============
+function PadelCourtLines({ w, h }) {
+  const stroke = "#0f766e";
+  const strokeWidth = 2;
+  const netY = h * 0.5;
+  const serviceTop = h * 0.18;
+  const serviceBottom = h * 0.82;
+  const midX = w * 0.5;
+  return (
+    <g>
+      <rect x={2} y={2} width={w - 4} height={h - 4} fill="#10b981" fillOpacity={0.18} stroke={stroke} strokeWidth={strokeWidth} rx={4} />
+      <line x1={2} y1={netY} x2={w - 2} y2={netY} stroke={stroke} strokeWidth={strokeWidth + 1} />
+      <line x1={2} y1={serviceTop} x2={w - 2} y2={serviceTop} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={2} y1={serviceBottom} x2={w - 2} y2={serviceBottom} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={midX} y1={serviceTop} x2={midX} y2={netY} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={midX} y1={netY} x2={midX} y2={serviceBottom} stroke={stroke} strokeWidth={strokeWidth} />
+    </g>
+  );
+}
+
+function TennisCourtLines({ w, h }) {
+  const stroke = "#fef3c7";
+  const strokeWidth = 2;
+  const pad = 2;
+  const courtW = w - pad * 2;
+  const courtH = h - pad * 2;
+  const singlesInsetX = courtW * (1.37 / 10.97);
+  const singlesLeft = pad + singlesInsetX;
+  const singlesRight = w - pad - singlesInsetX;
+  const netY = h * 0.5;
+  const serviceTop = netY - courtH * (6.4 / 23.77);
+  const serviceBottom = netY + courtH * (6.4 / 23.77);
+  const midX = w / 2;
+
+  return (
+    <g>
+      <rect x={pad} y={pad} width={courtW} height={courtH} fill="#c2410c" fillOpacity={0.85} stroke={stroke} strokeWidth={strokeWidth} rx={4} />
+      <line x1={singlesLeft} y1={pad} x2={singlesLeft} y2={h - pad} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={singlesRight} y1={pad} x2={singlesRight} y2={h - pad} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={pad} y1={netY} x2={w - pad} y2={netY} stroke={stroke} strokeWidth={strokeWidth + 1.5} />
+      <line x1={singlesLeft} y1={serviceTop} x2={singlesRight} y2={serviceTop} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={singlesLeft} y1={serviceBottom} x2={singlesRight} y2={serviceBottom} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={midX} y1={serviceTop} x2={midX} y2={netY} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={midX} y1={netY} x2={midX} y2={serviceBottom} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={midX} y1={pad} x2={midX} y2={pad + 6} stroke={stroke} strokeWidth={strokeWidth} />
+      <line x1={midX} y1={h - pad} x2={midX} y2={h - pad - 6} stroke={stroke} strokeWidth={strokeWidth} />
+    </g>
+  );
+}
+
+function ArrowSvg({ x1, y1, x2, y2, color, strokeWidth = 3, headSize = 10, selected }) {
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const hx1 = x2 - headSize * Math.cos(angle - Math.PI / 6);
+  const hy1 = y2 - headSize * Math.sin(angle - Math.PI / 6);
+  const hx2 = x2 - headSize * Math.cos(angle + Math.PI / 6);
+  const hy2 = y2 - headSize * Math.sin(angle + Math.PI / 6);
+  return (
+    <g>
+      {selected && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#3b82f6" strokeWidth={strokeWidth + 6} strokeLinecap="round" opacity={0.3} />}
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <polygon points={`${x2},${y2} ${hx1},${hy1} ${hx2},${hy2}`} fill={color} />
+      {selected && (
+        <>
+          <circle cx={x1} cy={y1} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} />
+          <circle cx={x2} cy={y2} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} />
+        </>
+      )}
+    </g>
+  );
+}
+
+// =============== PROJECT SCREEN ===============
+const VB_W = 300;
+const VB_H = 480;
+
+function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicker, setShowColorPicker, selectedArrowId, setSelectedArrowId, onBack, onChange }) {
+  const svgRef = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const isTenis = project.sport === "tenis";
+  const notesPreview = project.notes?.trim() ? project.notes.trim() : "Toca aquí para añadir anotaciones...";
+
+  const getSvgPoint = (e) => {
+    const svg = svgRef.current;
+    const rect = svg.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    const xNorm = (touch.clientX - rect.left) / rect.width;
+    const yNorm = (touch.clientY - rect.top) / rect.height;
+    return { x: Math.max(0, Math.min(1, xNorm)), y: Math.max(0, Math.min(1, yNorm)) };
+  };
+
+  const hitTestArrow = (pt) => {
+    const thresh = 0.035;
+    for (let i = project.arrows.length - 1; i >= 0; i--) {
+      const a = project.arrows[i];
+      const d1 = Math.hypot(pt.x - a.x1, pt.y - a.y1);
+      const d2 = Math.hypot(pt.x - a.x2, pt.y - a.y2);
+      if (d1 < thresh) return { id: a.id, which: "start" };
+      if (d2 < thresh) return { id: a.id, which: "end" };
+      const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq === 0 ? 0 : ((pt.x - a.x1) * dx + (pt.y - a.y1) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const px = a.x1 + t * dx, py = a.y1 + t * dy;
+      if (Math.hypot(pt.x - px, pt.y - py) < thresh) return { id: a.id, which: "body" };
+    }
+    return null;
+  };
+
+  const hitTestStroke = (pt) => {
+    const thresh = 0.035;
+    for (let i = project.strokes.length - 1; i >= 0; i--) {
+      const s = project.strokes[i];
+      for (const p of s.points) {
+        if (Math.hypot(pt.x - p.x, pt.y - p.y) < thresh) return s.id;
+      }
+    }
+    return null;
+  };
+
+  const handleStart = (e) => {
+    e.preventDefault();
+    const pt = getSvgPoint(e);
+    if (tool === "select") {
+      const hit = hitTestArrow(pt);
+      if (hit) {
+        setSelectedArrowId(hit.id);
+        if (hit.which === "start" || hit.which === "end") setDrag({ type: "arrow-handle", id: hit.id, which: hit.which });
+        else setDrag({ type: "arrow-move", id: hit.id, lastX: pt.x, lastY: pt.y });
+      } else setSelectedArrowId(null);
+      return;
+    }
+    if (tool === "arrow") {
+      setSelectedArrowId(null);
+      setDrag({ type: "arrow-create", x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y });
+      return;
+    }
+    if (tool === "draw") {
+      setSelectedArrowId(null);
+      const newStroke = { id: uid(), color, points: [pt] };
+      onChange(p => ({ ...p, strokes: [...p.strokes, newStroke] }));
+      setDrag({ type: "draw", strokeId: newStroke.id });
+      return;
+    }
+    if (tool === "erase") {
+      const sHit = hitTestStroke(pt);
+      if (sHit) onChange(p => ({ ...p, strokes: p.strokes.filter(s => s.id !== sHit) }));
+      const aHit = hitTestArrow(pt);
+      if (aHit) onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== aHit.id) }));
+      setDrag({ type: "erase" });
+      return;
+    }
+  };
+
+  const handleMove = (e) => {
+    if (!drag) return;
+    e.preventDefault();
+    const pt = getSvgPoint(e);
+    if (drag.type === "arrow-create") { setDrag(d => ({ ...d, x2: pt.x, y2: pt.y })); return; }
+    if (drag.type === "arrow-handle") {
+      onChange(p => ({ ...p, arrows: p.arrows.map(a => a.id === drag.id ? (drag.which === "start" ? { ...a, x1: pt.x, y1: pt.y } : { ...a, x2: pt.x, y2: pt.y }) : a) }));
+      return;
+    }
+    if (drag.type === "arrow-move") {
+      const dx = pt.x - drag.lastX, dy = pt.y - drag.lastY;
+      onChange(p => ({ ...p, arrows: p.arrows.map(a => a.id === drag.id ? { ...a, x1: a.x1 + dx, y1: a.y1 + dy, x2: a.x2 + dx, y2: a.y2 + dy } : a) }));
+      setDrag(d => ({ ...d, lastX: pt.x, lastY: pt.y }));
+      return;
+    }
+    if (drag.type === "draw") {
+      onChange(p => ({ ...p, strokes: p.strokes.map(s => s.id === drag.strokeId ? { ...s, points: [...s.points, pt] } : s) }));
+      return;
+    }
+    if (drag.type === "erase") {
+      const sHit = hitTestStroke(pt);
+      if (sHit) onChange(p => ({ ...p, strokes: p.strokes.filter(s => s.id !== sHit) }));
+      const aHit = hitTestArrow(pt);
+      if (aHit) onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== aHit.id) }));
+      return;
+    }
+  };
+
+  const handleEnd = () => {
+    if (drag?.type === "arrow-create") {
+      const dist = Math.hypot(drag.x2 - drag.x1, drag.y2 - drag.y1);
+      if (dist > 0.02) {
+        const newArrow = { id: uid(), x1: drag.x1, y1: drag.y1, x2: drag.x2, y2: drag.y2, color };
+        onChange(p => ({ ...p, arrows: [...p.arrows, newArrow] }));
+      }
+    }
+    setDrag(null);
+  };
+
+  const deleteSelectedArrow = () => {
+    if (!selectedArrowId) return;
+    onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== selectedArrowId) }));
+    setSelectedArrowId(null);
+  };
+
+  const clearAll = () => {
+    if (confirm("¿Borrar todos los dibujos y flechas de esta pista?")) {
+      onChange(p => ({ ...p, arrows: [], strokes: [] }));
+      setSelectedArrowId(null);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 relative">
+      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white/95 backdrop-blur-sm border-b border-slate-200 z-20">
+        <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 flex-shrink-0"><ArrowLeft size={16} /></button>
+        <h1 className="text-sm font-bold text-slate-800 flex-1 truncate">{project.name}</h1>
+        <ToolBtn icon={MousePointer2} active={tool === "select"} onClick={() => setTool("select")} compact />
+        <ToolBtn icon={MoveRight} active={tool === "arrow"} onClick={() => setTool("arrow")} compact />
+        <ToolBtn icon={Pencil} active={tool === "draw"} onClick={() => setTool("draw")} compact />
+        <ToolBtn icon={Eraser} active={tool === "erase"} onClick={() => setTool("erase")} compact />
+        <button onClick={() => setShowColorPicker(s => !s)} className="relative p-1.5 rounded-lg hover:bg-slate-100 flex-shrink-0">
+          <span className="w-4 h-4 rounded-full border border-slate-300 block" style={{ backgroundColor: color }} />
+        </button>
+        {selectedArrowId && (
+          <button onClick={deleteSelectedArrow} className="p-1.5 rounded-lg bg-red-50 text-red-500 flex-shrink-0"><Trash2 size={14} /></button>
+        )}
+        <button onClick={clearAll} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 flex-shrink-0"><X size={14} /></button>
+      </div>
+
+      {showColorPicker && (
+        <div className="px-2 py-1.5 bg-white border-b border-slate-200 flex items-center gap-2 z-20">
+          {COLORS.map(c => (
+            <button key={c} onClick={() => { setColor(c); setShowColorPicker(false); }}
+              className="w-6 h-6 rounded-full border-2 transition-transform"
+              style={{ backgroundColor: c, borderColor: c === color ? "#0f172a" : "transparent", transform: c === color ? "scale(1.15)" : "scale(1)" }} />
+          ))}
+        </div>
+      )}
+
+      <div className={`flex items-center justify-center p-1 min-h-0 ${isTenis ? "bg-orange-100" : "bg-slate-100"}`}
+        style={{ flexBasis: notesOpen ? "55%" : "auto", flexGrow: notesOpen ? 0 : 1, minHeight: 0 }}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${VB_W} ${VB_H}`}
+          className="rounded-md shadow-sm select-none touch-none"
+          style={{ width: "100%", height: "100%", maxWidth: `calc(${notesOpen ? "45vh" : "70vh"} * ${VB_W / VB_H})`, aspectRatio: `${VB_W}/${VB_H}` }}
+          onMouseDown={handleStart} onMouseMove={handleMove} onMouseUp={handleEnd} onMouseLeave={handleEnd}
+          onTouchStart={handleStart} onTouchMove={handleMove} onTouchEnd={handleEnd}
+        >
+          {isTenis ? <TennisCourtLines w={VB_W} h={VB_H} /> : <PadelCourtLines w={VB_W} h={VB_H} />}
+          {project.strokes.map(s => (
+            <polyline key={s.id} points={s.points.map(p => `${p.x * VB_W},${p.y * VB_H}`).join(" ")}
+              fill="none" stroke={s.color} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+          ))}
+          {project.arrows.map(a => (
+            <g key={a.id} onClick={() => tool === "select" && setSelectedArrowId(a.id)}>
+              <ArrowSvg x1={a.x1 * VB_W} y1={a.y1 * VB_H} x2={a.x2 * VB_W} y2={a.y2 * VB_H} color={a.color} strokeWidth={3.5} headSize={12} selected={selectedArrowId === a.id} />
+            </g>
+          ))}
+          {drag?.type === "arrow-create" && (
+            <ArrowSvg x1={drag.x1 * VB_W} y1={drag.y1 * VB_H} x2={drag.x2 * VB_W} y2={drag.y2 * VB_H} color={color} strokeWidth={3.5} headSize={12} />
+          )}
+        </svg>
+      </div>
+
+      <div className={`border-t border-slate-200 bg-white flex-shrink-0 flex flex-col ${notesOpen ? "flex-1" : ""}`} style={{ flexBasis: notesOpen ? "45%" : "auto", minHeight: 0 }}>
+        <button onClick={() => setNotesOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-500 flex-shrink-0">
+          <span className="flex items-center gap-1.5 truncate">
+            Anotaciones
+            {!notesOpen && <span className="font-normal text-slate-400 truncate max-w-[180px] sm:max-w-xs">— {notesPreview}</span>}
+          </span>
+          {notesOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </button>
+        {notesOpen && (
+          <div className="px-3 pb-3 flex-1 min-h-0 flex flex-col">
+            <textarea
+              value={project.notes}
+              onChange={(e) => onChange(p => ({ ...p, notes: e.target.value }))}
+              placeholder="Escribe aquí tus notas sobre esta jugada o ejercicio..."
+              className="w-full flex-1 resize-none border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+              autoFocus
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolBtn({ icon: Icon, active, onClick, label, compact }) {
+  if (compact) {
+    return (
+      <button onClick={onClick} className={`p-1.5 rounded-lg flex-shrink-0 ${active ? "bg-emerald-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}>
+        <Icon size={16} />
+      </button>
+    );
+  }
+  return (
+    <button onClick={onClick} title={label}
+      className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${active ? "bg-emerald-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}>
+      <Icon size={16} />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
+// =============== MODALES ===============
+function Modal({ title, value, setValue, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <div className="bg-white rounded-xl p-4 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-3">{title}</h3>
+        <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") onConfirm(); if (e.key === "Escape") onCancel(); }}
+          placeholder="Nombre..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 rounded-lg flex items-center gap-1"><X size={14} /> Cancelar</button>
+          <button onClick={onConfirm} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-1"><Check size={14} /> Confirmar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewProjectModal({ value, setValue, onChoose, onCancel }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <div className="bg-white rounded-xl p-4 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-3">Nuevo proyecto</h3>
+        <label className="text-xs font-semibold text-slate-500 mb-1 block">Nombre (opcional)</label>
+        <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
+          placeholder="Ej: Saque y volea"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+        <label className="text-xs font-semibold text-slate-500 mb-2 block">¿Qué deporte?</label>
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <button onClick={() => onChoose("padel")} className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50 hover:border-emerald-500 transition-colors">
+            <svg viewBox="0 0 100 160" className="w-14 h-20"><PadelCourtLines w={100} h={160} /></svg>
+            <span className="text-sm font-semibold text-emerald-700">Pádel</span>
+          </button>
+          <button onClick={() => onChoose("tenis")} className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-orange-200 bg-orange-50 hover:border-orange-500 transition-colors">
+            <svg viewBox="0 0 100 160" className="w-14 h-20"><TennisCourtLines w={100} h={160} /></svg>
+            <span className="text-sm font-semibold text-orange-700">Tenis</span>
+          </button>
+        </div>
+        <button onClick={onCancel} className="w-full mt-2 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 rounded-lg flex items-center justify-center gap-1"><X size={14} /> Cancelar</button>
+      </div>
+    </div>
+  );
+}
