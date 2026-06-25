@@ -29,13 +29,13 @@ function makeSupabase(url, key) {
     },
     getRefreshToken() { return refreshToken; },
 
-    async signInWithOtp(email) {
+    async signInWithOtp(email, redirectTo) {
       const res = await fetch(`${url}/auth/v1/otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: key },
-        body: JSON.stringify({ email, create_user: true }),
+        body: JSON.stringify({ email, create_user: true, options: { email_redirect_to: redirectTo } }),
       });
-      if (!res.ok) throw new Error((await res.json()).error_description || "Error al enviar el código");
+      if (!res.ok) throw new Error((await res.json()).error_description || "Error al enviar el enlace");
       return true;
     },
 
@@ -116,9 +116,9 @@ export default function App() {
   const [authState, setAuthState] = useState("loading");
   const [user, setUser] = useState(null);
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [linkSentTo, setLinkSentTo] = useState("");
 
   const [folders, setFolders] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -133,6 +133,29 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      // 1. ¿Venimos de hacer clic en el enlace del email? Supabase pone el token en el fragmento de la URL.
+      try {
+        const hash = window.location.hash;
+        if (hash && hash.includes("access_token")) {
+          const params = new URLSearchParams(hash.replace("#", ""));
+          const access_token = params.get("access_token");
+          const refresh_token = params.get("refresh_token");
+          if (access_token && refresh_token) {
+            sb.setSession({ access_token, refresh_token });
+            sessionStore.set(refresh_token);
+            const u = await sb.getUser();
+            if (u && !u.error) {
+              setUser(u);
+              setAuthState("signedIn");
+              // limpiar la URL para no dejar el token visible
+              window.history.replaceState(null, "", window.location.pathname);
+              return;
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 2. ¿Tenemos una sesión guardada de antes?
       try {
         const stored = sessionStore.get();
         if (stored) {
@@ -176,34 +199,26 @@ export default function App() {
     })();
   }, [authState]);
 
-  const sendCode = async () => {
+  const sendLink = async () => {
     setAuthError("");
     if (!email.trim() || !email.includes("@")) { setAuthError("Introduce un email válido."); return; }
     setAuthBusy(true);
-    try { await sb.signInWithOtp(email.trim()); setAuthState("awaitingCode"); }
-    catch (e) { setAuthError(e.message); }
-    finally { setAuthBusy(false); }
-  };
-
-  const confirmCode = async () => {
-    setAuthError("");
-    if (!code.trim()) { setAuthError("Introduce el código que recibiste por email."); return; }
-    setAuthBusy(true);
     try {
-      const session = await sb.verifyOtp(email.trim(), code.trim());
-      sb.setSession(session);
-      sessionStore.set(session.refresh_token);
-      setUser(session.user);
-      setAuthState("signedIn");
-    } catch (e) { setAuthError(e.message); }
-    finally { setAuthBusy(false); }
+      await sb.signInWithOtp(email.trim(), window.location.origin + window.location.pathname);
+      setLinkSentTo(email.trim());
+      setAuthState("linkSent");
+    } catch (e) {
+      setAuthError(e.message);
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const doSignOut = async () => {
     await sb.signOut();
     sessionStore.clear();
     setUser(null); setFolders([]); setDataLoaded(false);
-    setView({ screen: "home" }); setEmail(""); setCode(""); setAuthError("");
+    setView({ screen: "home" }); setEmail(""); setAuthError(""); setLinkSentTo("");
     setAuthState("signedOut");
   };
 
@@ -299,7 +314,7 @@ export default function App() {
     );
   }
 
-  if (authState === "signedOut" || authState === "awaitingCode") {
+  if (authState === "signedOut" || authState === "linkSent") {
     return (
       <div className="h-full w-full flex items-center justify-center bg-slate-50 p-4">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 w-full max-w-sm">
@@ -313,31 +328,32 @@ export default function App() {
               <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 mb-3">
                 <Mail size={16} className="text-slate-400" />
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && sendCode()} placeholder="tu@email.com" className="flex-1 text-sm outline-none" />
+                  onKeyDown={(e) => e.key === "Enter" && sendLink()} placeholder="tu@email.com" className="flex-1 text-sm outline-none" />
               </div>
               {authError && <p className="text-xs text-red-500 mb-3">{authError}</p>}
-              <button onClick={sendCode} disabled={authBusy}
+              <button onClick={sendLink} disabled={authBusy}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2">
                 {authBusy ? <Loader2 size={16} className="animate-spin" /> : null}
-                Enviar código de acceso
+                Enviar enlace de acceso
               </button>
-              <p className="text-xs text-slate-400 text-center mt-3">Te enviaremos un código de un solo uso, sin contraseñas.</p>
+              <p className="text-xs text-slate-400 text-center mt-3">Te enviaremos un enlace de un solo uso, sin contraseñas.</p>
             </>
           )}
 
-          {authState === "awaitingCode" && (
+          {authState === "linkSent" && (
             <>
-              <p className="text-sm text-slate-600 mb-3">Hemos enviado un código a <strong>{email}</strong>. Revisa tu bandeja (y spam).</p>
-              <label className="text-xs font-semibold text-slate-500 mb-1 block">Código de 6 dígitos</label>
-              <input value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmCode()}
-                placeholder="123456" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:ring-2 focus:ring-emerald-400" />
-              {authError && <p className="text-xs text-red-500 mb-3">{authError}</p>}
-              <button onClick={confirmCode} disabled={authBusy}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 mb-2">
-                {authBusy ? <Loader2 size={16} className="animate-spin" /> : null}
-                Confirmar
-              </button>
-              <button onClick={() => { setAuthState("signedOut"); setCode(""); setAuthError(""); }} className="w-full text-slate-400 hover:text-slate-600 text-xs py-1">
+              <div className="flex items-center justify-center mb-3">
+                <Mail size={36} className="text-emerald-500" strokeWidth={1.5} />
+              </div>
+              <p className="text-sm text-slate-600 text-center mb-1">Hemos enviado un enlace a</p>
+              <p className="text-sm font-semibold text-slate-800 text-center mb-4">{linkSentTo}</p>
+              <p className="text-xs text-slate-500 text-center mb-4">
+                Abre tu correo <strong>desde este mismo dispositivo</strong> y pulsa el enlace para entrar. Revisa también la carpeta de spam.
+              </p>
+              <button
+                onClick={() => { setAuthState("signedOut"); setAuthError(""); }}
+                className="w-full text-slate-400 hover:text-slate-600 text-xs py-1"
+              >
                 Usar otro email
               </button>
             </>
