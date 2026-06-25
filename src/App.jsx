@@ -350,9 +350,12 @@ export default function App() {
               <p className="text-xs text-slate-500 text-center mb-4">
                 Abre tu correo <strong>desde este mismo dispositivo</strong> y pulsa el enlace para entrar. Revisa también la carpeta de spam.
               </p>
+              <p className="text-xs text-amber-600 text-center mb-3">
+                ¿Email equivocado? Pulsa abajo para escribir uno nuevo — el enlace anterior dejará de ser necesario.
+              </p>
               <button
-                onClick={() => { setAuthState("signedOut"); setAuthError(""); }}
-                className="w-full text-slate-400 hover:text-slate-600 text-xs py-1"
+                onClick={() => { setAuthState("signedOut"); setAuthError(""); setEmail(""); }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-lg"
               >
                 Usar otro email
               </button>
@@ -603,22 +606,24 @@ const VB_H = 480;
 
 function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicker, setShowColorPicker, selectedArrowId, setSelectedArrowId, onBack, onChange }) {
   const svgRef = useRef(null);
+  const courtWrapRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const isTenis = project.sport === "tenis";
-  const notesPreview = project.notes?.trim() ? project.notes.trim() : "Toca aquí para añadir anotaciones...";
 
+  // Convierte coordenadas de pantalla a coordenadas normalizadas (0-1) dentro del SVG,
+  // compensando el aspect-ratio real renderizado (evita el desplazamiento "pinto arriba de donde toco").
   const getSvgPoint = (e) => {
     const svg = svgRef.current;
     const rect = svg.getBoundingClientRect();
-    const touch = e.touches ? e.touches[0] : e;
+    const touch = e.touches && e.touches.length ? e.touches[0] : (e.changedTouches && e.changedTouches.length ? e.changedTouches[0] : e);
     const xNorm = (touch.clientX - rect.left) / rect.width;
     const yNorm = (touch.clientY - rect.top) / rect.height;
     return { x: Math.max(0, Math.min(1, xNorm)), y: Math.max(0, Math.min(1, yNorm)) };
   };
 
   const hitTestArrow = (pt) => {
-    const thresh = 0.035;
+    const thresh = 0.04;
     for (let i = project.arrows.length - 1; i >= 0; i--) {
       const a = project.arrows[i];
       const d1 = Math.hypot(pt.x - a.x1, pt.y - a.y1);
@@ -636,7 +641,7 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
   };
 
   const hitTestStroke = (pt) => {
-    const thresh = 0.035;
+    const thresh = 0.04;
     for (let i = project.strokes.length - 1; i >= 0; i--) {
       const s = project.strokes[i];
       for (const p of s.points) {
@@ -732,6 +737,23 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
     }
   };
 
+  // ---- Gesto de deslizar (solo en modo "select") para abrir/cerrar el panel de notas ----
+  const swipeRef = useRef(null);
+  const onCourtTouchStart = (e) => {
+    if (tool !== "select") return;
+    const t = e.touches?.[0];
+    if (t) swipeRef.current = { startY: t.clientY, moved: false };
+  };
+  const onCourtTouchMove = (e) => {
+    if (tool !== "select" || !swipeRef.current) return;
+    const t = e.touches?.[0];
+    if (!t) return;
+    const deltaY = swipeRef.current.startY - t.clientY;
+    if (deltaY > 35 && !notesOpen) { setNotesOpen(true); swipeRef.current.moved = true; }
+    if (deltaY < -35 && notesOpen) { setNotesOpen(false); swipeRef.current.moved = true; }
+  };
+  const onCourtTouchEnd = () => { swipeRef.current = null; };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 relative">
       <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white/95 backdrop-blur-sm border-b border-slate-200 z-20">
@@ -760,13 +782,20 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         </div>
       )}
 
-      <div className={`flex items-center justify-center p-1 min-h-0 ${isTenis ? "bg-orange-100" : "bg-slate-100"}`}
-        style={{ flexBasis: notesOpen ? "55%" : "auto", flexGrow: notesOpen ? 0 : 1, minHeight: 0 }}>
+      <div
+        ref={courtWrapRef}
+        className={`flex items-center justify-center p-1 min-h-0 ${isTenis ? "bg-orange-100" : "bg-slate-100"}`}
+        style={{ flexBasis: notesOpen ? "52%" : "auto", flexGrow: notesOpen ? 0 : 1, minHeight: 0, transition: "flex-basis 0.25s ease" }}
+        onTouchStart={onCourtTouchStart}
+        onTouchMove={onCourtTouchMove}
+        onTouchEnd={onCourtTouchEnd}
+      >
         <svg
           ref={svgRef}
           viewBox={`0 0 ${VB_W} ${VB_H}`}
+          preserveAspectRatio="xMidYMid meet"
           className="rounded-md shadow-sm select-none touch-none"
-          style={{ width: "100%", height: "100%", maxWidth: `calc(${notesOpen ? "45vh" : "70vh"} * ${VB_W / VB_H})`, aspectRatio: `${VB_W}/${VB_H}` }}
+          style={{ width: "100%", height: "100%", maxWidth: `calc(${notesOpen ? "42vh" : "70vh"} * ${VB_W / VB_H})`, aspectRatio: `${VB_W}/${VB_H}` }}
           onMouseDown={handleStart} onMouseMove={handleMove} onMouseUp={handleEnd} onMouseLeave={handleEnd}
           onTouchStart={handleStart} onTouchMove={handleMove} onTouchEnd={handleEnd}
         >
@@ -786,26 +815,32 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         </svg>
       </div>
 
-      <div className={`border-t border-slate-200 bg-white flex-shrink-0 flex flex-col ${notesOpen ? "flex-1" : ""}`} style={{ flexBasis: notesOpen ? "45%" : "auto", minHeight: 0 }}>
-        <button onClick={() => setNotesOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-500 flex-shrink-0">
-          <span className="flex items-center gap-1.5 truncate">
-            Anotaciones
-            {!notesOpen && <span className="font-normal text-slate-400 truncate max-w-[180px] sm:max-w-xs">— {notesPreview}</span>}
-          </span>
-          {notesOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+      <div
+        className={`border-t border-slate-200 bg-white flex-shrink-0 flex flex-col ${notesOpen ? "flex-1" : ""}`}
+        style={{ flexBasis: notesOpen ? "48%" : "0px", minHeight: 0, overflow: "hidden", transition: "flex-basis 0.25s ease" }}
+      >
+        <button onClick={() => setNotesOpen(o => !o)} className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-slate-400 flex-shrink-0 border-b border-slate-100">
+          <span className="block w-8 h-1 rounded-full bg-slate-300" />
         </button>
-        {notesOpen && (
-          <div className="px-3 pb-3 flex-1 min-h-0 flex flex-col">
-            <textarea
-              value={project.notes}
-              onChange={(e) => onChange(p => ({ ...p, notes: e.target.value }))}
-              placeholder="Escribe aquí tus notas sobre esta jugada o ejercicio..."
-              className="w-full flex-1 resize-none border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
-              autoFocus
-            />
-          </div>
-        )}
+        <div className="px-3 pb-3 pt-2 flex-1 min-h-0 flex flex-col">
+          <label className="text-xs font-semibold text-slate-500 mb-1 block">Anotaciones</label>
+          <textarea
+            value={project.notes}
+            onChange={(e) => onChange(p => ({ ...p, notes: e.target.value }))}
+            placeholder="Escribe aquí tus notas sobre esta jugada o ejercicio..."
+            className="w-full flex-1 resize-none border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+          />
+        </div>
       </div>
+
+      {!notesOpen && (
+        <button
+          onClick={() => setNotesOpen(true)}
+          className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-sm border border-slate-200 rounded-full px-3 py-1 text-xs text-slate-500 shadow-sm flex items-center gap-1 z-10"
+        >
+          <ChevronUp size={12} /> Anotaciones
+        </button>
+      )}
     </div>
   );
 }
