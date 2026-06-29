@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown } from "lucide-react";
+import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown, Triangle } from "lucide-react";
 
 // ============================================================
 // CONFIGURA AQUÍ TUS CLAVES DE SUPABASE
@@ -184,7 +184,7 @@ export default function App() {
         setDataError("");
         const [fRows, pRows] = await Promise.all([
           sb.select("folders", "select=id,name,created_at&order=created_at.asc"),
-          sb.select("projects", "select=id,folder_id,name,sport,notes,arrows,strokes,created_at&order=created_at.asc"),
+          sb.select("projects", "select=id,folder_id,name,sport,notes,arrows,strokes,cones,created_at&order=created_at.asc"),
         ]);
         const merged = fRows.map(f => ({
           id: f.id,
@@ -192,7 +192,7 @@ export default function App() {
           createdAt: f.created_at,
           projects: pRows.filter(p => p.folder_id === f.id).map(p => ({
             id: p.id, name: p.name, sport: p.sport || "padel", notes: p.notes || "",
-            arrows: p.arrows || [], strokes: p.strokes || [], createdAt: p.created_at,
+            arrows: p.arrows || [], strokes: p.strokes || [], cones: p.cones || [], createdAt: p.created_at,
           })),
         }));
         setFolders(merged);
@@ -238,10 +238,10 @@ export default function App() {
 
   const addProject = async (folderId, name, sport) => {
     const tempId = uid();
-    const blank = { id: tempId, name, sport, notes: "", arrows: [], strokes: [], createdAt: Date.now() };
+    const blank = { id: tempId, name, sport, notes: "", arrows: [], strokes: [], cones: [], createdAt: Date.now() };
     setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: [...f.projects, blank] } : f));
     try {
-      const [row] = await sb.insert("projects", { folder_id: folderId, user_id: user.id, name, sport, notes: "", arrows: [], strokes: [] });
+      const [row] = await sb.insert("projects", { folder_id: folderId, user_id: user.id, name, sport, notes: "", arrows: [], strokes: [], cones: [] });
       setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: f.projects.map(p => p.id === tempId ? { ...p, id: row.id } : p) } : f));
     } catch (e) { setDataError("No se pudo guardar el proyecto en el servidor."); }
   };
@@ -280,7 +280,7 @@ export default function App() {
         const folder = curr.find(f => f.id === folderId);
         const proj = folder?.projects.find(p => p.id === projectId);
         if (proj) {
-          sb.update("projects", projectId, { notes: proj.notes, arrows: proj.arrows, strokes: proj.strokes })
+          sb.update("projects", projectId, { notes: proj.notes, arrows: proj.arrows, strokes: proj.strokes, cones: proj.cones })
             .catch(() => setDataError("No se pudieron sincronizar los últimos cambios."));
         }
         return curr;
@@ -500,7 +500,7 @@ function FolderScreen({ folder, onBack, onOpenProject, onNewProject, onDeletePro
               <div key={project.id} onClick={() => onOpenProject(project.id)}
                 className="group relative bg-white rounded-xl border border-slate-200 overflow-hidden cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all">
                 <div className={`aspect-[4/5] flex items-center justify-center p-2 ${project.sport === "tenis" ? "bg-orange-50" : "bg-emerald-50"}`}>
-                  <MiniCourtPreview sport={project.sport} arrows={project.arrows} strokes={project.strokes} />
+                  <MiniCourtPreview sport={project.sport} arrows={project.arrows} strokes={project.strokes} cones={project.cones} />
                 </div>
                 <div className="p-2 text-center">
                   <span className="text-sm font-medium text-slate-700 line-clamp-1">{project.name}</span>
@@ -519,7 +519,7 @@ function FolderScreen({ folder, onBack, onOpenProject, onNewProject, onDeletePro
   );
 }
 
-function MiniCourtPreview({ sport, arrows, strokes }) {
+function MiniCourtPreview({ sport, arrows, strokes, cones }) {
   return (
     <svg viewBox="0 0 200 320" className="w-full h-full">
       {sport === "tenis" ? <TennisCourtLines w={200} h={320} /> : <PadelCourtLines w={200} h={320} />}
@@ -529,6 +529,9 @@ function MiniCourtPreview({ sport, arrows, strokes }) {
       ))}
       {arrows.map(a => (
         <ArrowSvg key={a.id} x1={a.x1 * 200} y1={a.y1 * 320} x2={a.x2 * 200} y2={a.y2 * 320} color={a.color} strokeWidth={2} headSize={6} />
+      ))}
+      {(cones || []).map(c => (
+        <ConeSvg key={c.id} x={c.x * 200} y={c.y * 320} color={c.color} size={200 * CONE_SIZE_RATIO} />
       ))}
     </svg>
   );
@@ -605,6 +608,34 @@ function ArrowSvg({ x1, y1, x2, y2, color, strokeWidth = 3, headSize = 10, selec
   );
 }
 
+// Un cono de entrenamiento real mide ~20cm de base. Una pista de pádel mide 10m de largo.
+// 0.2 / 10 = 2% del largo de la pista. Lo usamos como referencia de tamaño (proporción
+// del lado más largo del campo de juego, VB_H), igual para pádel y tenis.
+const CONE_SIZE_RATIO = 0.022;
+
+function ConeSvg({ x, y, color, size = 10, selected }) {
+  const halfBase = size * 0.5;
+  const topY = y - size * 0.95;
+  return (
+    <g>
+      {selected && <circle cx={x} cy={y} r={size * 0.9} fill="#3b82f6" opacity={0.25} />}
+      {/* sombra/base elíptica */}
+      <ellipse cx={x} cy={y} rx={halfBase} ry={halfBase * 0.38} fill={color} opacity={0.9} />
+      {/* cuerpo del cono */}
+      <polygon
+        points={`${x - halfBase * 0.78},${y} ${x + halfBase * 0.78},${y} ${x},${topY}`}
+        fill={color}
+      />
+      {/* franja clara, como los conos reales */}
+      <polygon
+        points={`${x - halfBase * 0.45},${y - size * 0.32} ${x + halfBase * 0.45},${y - size * 0.32} ${x + halfBase * 0.27},${y - size * 0.5} ${x - halfBase * 0.27},${y - size * 0.5}`}
+        fill="white" opacity={0.85}
+      />
+      {selected && <circle cx={x} cy={y} r={5} fill="white" stroke="#3b82f6" strokeWidth={2} />}
+    </g>
+  );
+}
+
 // =============== PROJECT SCREEN ===============
 const VB_W = 300;
 const VB_H = 480;
@@ -615,6 +646,7 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
   const [drag, setDrag] = useState(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const isTenis = project.sport === "tenis";
+  const cones = project.cones || [];
 
   // Convierte coordenadas de pantalla a coordenadas normalizadas (0-1) dentro del SVG,
   // usando la matriz de transformación nativa del navegador (getScreenCTM). Esto es
@@ -652,6 +684,17 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
     return null;
   };
 
+  const hitTestCone = (pt) => {
+    const thresh = CONE_SIZE_RATIO * 1.6;
+    for (let i = cones.length - 1; i >= 0; i--) {
+      const c = cones[i];
+      const dx = pt.x - c.x;
+      const dy = (pt.y - c.y) * (VB_H / VB_W); // compensar proporción no cuadrada del viewBox
+      if (Math.hypot(dx, dy) < thresh) return c.id;
+    }
+    return null;
+  };
+
   const hitTestStroke = (pt) => {
     const thresh = 0.04;
     for (let i = project.strokes.length - 1; i >= 0; i--) {
@@ -663,25 +706,43 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
     return null;
   };
 
+  const [selectedConeId, setSelectedConeId] = useState(null);
+
   const handleStart = (e) => {
     e.preventDefault();
     const pt = getSvgPoint(e);
     if (tool === "select") {
+      const coneHit = hitTestCone(pt);
+      if (coneHit) {
+        setSelectedConeId(coneHit);
+        setSelectedArrowId(null);
+        setDrag({ type: "cone-move", id: coneHit, lastX: pt.x, lastY: pt.y });
+        return;
+      }
       const hit = hitTestArrow(pt);
       if (hit) {
         setSelectedArrowId(hit.id);
+        setSelectedConeId(null);
         if (hit.which === "start" || hit.which === "end") setDrag({ type: "arrow-handle", id: hit.id, which: hit.which });
         else setDrag({ type: "arrow-move", id: hit.id, lastX: pt.x, lastY: pt.y });
-      } else setSelectedArrowId(null);
+      } else { setSelectedArrowId(null); setSelectedConeId(null); }
       return;
     }
     if (tool === "arrow") {
-      setSelectedArrowId(null);
+      setSelectedArrowId(null); setSelectedConeId(null);
       setDrag({ type: "arrow-create", x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y });
       return;
     }
-    if (tool === "draw") {
+    if (tool === "cone") {
       setSelectedArrowId(null);
+      const newCone = { id: uid(), x: pt.x, y: pt.y, color };
+      onChange(p => ({ ...p, cones: [...(p.cones || []), newCone] }));
+      setSelectedConeId(newCone.id);
+      setDrag(null);
+      return;
+    }
+    if (tool === "draw") {
+      setSelectedArrowId(null); setSelectedConeId(null);
       const newStroke = { id: uid(), color, points: [pt] };
       onChange(p => ({ ...p, strokes: [...p.strokes, newStroke] }));
       setDrag({ type: "draw", strokeId: newStroke.id });
@@ -692,6 +753,8 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
       if (sHit) onChange(p => ({ ...p, strokes: p.strokes.filter(s => s.id !== sHit) }));
       const aHit = hitTestArrow(pt);
       if (aHit) onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== aHit.id) }));
+      const cHit = hitTestCone(pt);
+      if (cHit) onChange(p => ({ ...p, cones: (p.cones || []).filter(c => c.id !== cHit) }));
       setDrag({ type: "erase" });
       return;
     }
@@ -712,6 +775,12 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
       setDrag(d => ({ ...d, lastX: pt.x, lastY: pt.y }));
       return;
     }
+    if (drag.type === "cone-move") {
+      const dx = pt.x - drag.lastX, dy = pt.y - drag.lastY;
+      onChange(p => ({ ...p, cones: (p.cones || []).map(c => c.id === drag.id ? { ...c, x: c.x + dx, y: c.y + dy } : c) }));
+      setDrag(d => ({ ...d, lastX: pt.x, lastY: pt.y }));
+      return;
+    }
     if (drag.type === "draw") {
       onChange(p => ({ ...p, strokes: p.strokes.map(s => s.id === drag.strokeId ? { ...s, points: [...s.points, pt] } : s) }));
       return;
@@ -721,6 +790,8 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
       if (sHit) onChange(p => ({ ...p, strokes: p.strokes.filter(s => s.id !== sHit) }));
       const aHit = hitTestArrow(pt);
       if (aHit) onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== aHit.id) }));
+      const cHit = hitTestCone(pt);
+      if (cHit) onChange(p => ({ ...p, cones: (p.cones || []).filter(c => c.id !== cHit) }));
       return;
     }
   };
@@ -737,27 +808,39 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
   };
 
   const deleteSelectedArrow = () => {
-    if (!selectedArrowId) return;
-    onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== selectedArrowId) }));
-    setSelectedArrowId(null);
+    if (selectedArrowId) {
+      onChange(p => ({ ...p, arrows: p.arrows.filter(a => a.id !== selectedArrowId) }));
+      setSelectedArrowId(null);
+    }
+    if (selectedConeId) {
+      onChange(p => ({ ...p, cones: (p.cones || []).filter(c => c.id !== selectedConeId) }));
+      setSelectedConeId(null);
+    }
+  };
+
+  const recolorSelectedCone = (newColor) => {
+    if (!selectedConeId) return;
+    onChange(p => ({ ...p, cones: (p.cones || []).map(c => c.id === selectedConeId ? { ...c, color: newColor } : c) }));
   };
 
   const clearAll = () => {
-    if (confirm("¿Borrar todos los dibujos y flechas de esta pista?")) {
-      onChange(p => ({ ...p, arrows: [], strokes: [] }));
+    if (confirm("¿Borrar todos los dibujos, flechas y conos de esta pista?")) {
+      onChange(p => ({ ...p, arrows: [], strokes: [], cones: [] }));
       setSelectedArrowId(null);
+      setSelectedConeId(null);
     }
   };
 
   // ---- Panel de notas: se abre/cierra con el botón "A" de la barra de herramientas ----
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 relative">
-      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white/95 backdrop-blur-sm border-b border-slate-200 z-20">
+    <div className="flex-1 flex flex-col min-h-0 relative" style={{ height: "100%" }}>
+      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white border-b border-slate-200 z-20 flex-shrink-0 flex-wrap">
         <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 flex-shrink-0"><ArrowLeft size={16} /></button>
-        <h1 className="text-sm font-bold text-slate-800 flex-1 truncate">{project.name}</h1>
+        <h1 className="text-sm font-bold text-slate-800 flex-1 truncate min-w-0">{project.name}</h1>
         <ToolBtn icon={MousePointer2} active={tool === "select"} onClick={() => setTool("select")} compact />
         <ToolBtn icon={MoveRight} active={tool === "arrow"} onClick={() => setTool("arrow")} compact />
+        <ToolBtn icon={Triangle} active={tool === "cone"} onClick={() => setTool("cone")} compact />
         <ToolBtn icon={Pencil} active={tool === "draw"} onClick={() => setTool("draw")} compact />
         <ToolBtn icon={Eraser} active={tool === "erase"} onClick={() => setTool("erase")} compact />
         <button
@@ -770,16 +853,16 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         <button onClick={() => setShowColorPicker(s => !s)} className="relative p-1.5 rounded-lg hover:bg-slate-100 flex-shrink-0">
           <span className="w-4 h-4 rounded-full border border-slate-300 block" style={{ backgroundColor: color }} />
         </button>
-        {selectedArrowId && (
+        {(selectedArrowId || selectedConeId) && (
           <button onClick={deleteSelectedArrow} className="p-1.5 rounded-lg bg-red-50 text-red-500 flex-shrink-0"><Trash2 size={14} /></button>
         )}
         <button onClick={clearAll} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 flex-shrink-0"><Trash2 size={16} /></button>
       </div>
 
       {showColorPicker && (
-        <div className="px-2 py-1.5 bg-white border-b border-slate-200 flex items-center gap-2 z-20">
+        <div className="px-2 py-1.5 bg-white border-b border-slate-200 flex items-center gap-2 z-20 flex-shrink-0">
           {COLORS.map(c => (
-            <button key={c} onClick={() => { setColor(c); setShowColorPicker(false); }}
+            <button key={c} onClick={() => { setColor(c); if (selectedConeId) recolorSelectedCone(c); setShowColorPicker(false); }}
               className="w-6 h-6 rounded-full border-2 transition-transform"
               style={{ backgroundColor: c, borderColor: c === color ? "#0f172a" : "transparent", transform: c === color ? "scale(1.15)" : "scale(1)" }} />
           ))}
@@ -809,6 +892,9 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
             <g key={a.id} onClick={() => tool === "select" && setSelectedArrowId(a.id)}>
               <ArrowSvg x1={a.x1 * VB_W} y1={a.y1 * VB_H} x2={a.x2 * VB_W} y2={a.y2 * VB_H} color={a.color} strokeWidth={3.5} headSize={12} selected={selectedArrowId === a.id} />
             </g>
+          ))}
+          {cones.map(c => (
+            <ConeSvg key={c.id} x={c.x * VB_W} y={c.y * VB_H} color={c.color} size={VB_W * CONE_SIZE_RATIO} selected={selectedConeId === c.id} />
           ))}
           {drag?.type === "arrow-create" && (
             <ArrowSvg x1={drag.x1 * VB_W} y1={drag.y1 * VB_H} x2={drag.x2 * VB_W} y2={drag.y2 * VB_H} color={color} strokeWidth={3.5} headSize={12} />
