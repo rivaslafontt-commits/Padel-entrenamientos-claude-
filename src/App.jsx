@@ -35,7 +35,12 @@ function makeSupabase(url, key) {
         headers: { "Content-Type": "application/json", apikey: key },
         body: JSON.stringify({ email, create_user: true, options: { email_redirect_to: redirectTo } }),
       });
-      if (!res.ok) throw new Error((await res.json()).error_description || "Error al enviar el enlace");
+      if (!res.ok) {
+        let data = {};
+        try { data = await res.json(); } catch (e) {}
+        const msg = data.error_description || data.msg || data.message || data.error_code || `Error ${res.status}`;
+        throw new Error(msg);
+      }
       return true;
     },
 
@@ -612,14 +617,21 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
   const isTenis = project.sport === "tenis";
 
   // Convierte coordenadas de pantalla a coordenadas normalizadas (0-1) dentro del SVG,
-  // compensando el aspect-ratio real renderizado (evita el desplazamiento "pinto arriba de donde toco").
+  // usando la matriz de transformación nativa del navegador (getScreenCTM). Esto es
+  // exacto siempre, sin necesidad de calcular manualmente offsets ni aspect-ratios.
   const getSvgPoint = (e) => {
     const svg = svgRef.current;
-    const rect = svg.getBoundingClientRect();
     const touch = e.touches && e.touches.length ? e.touches[0] : (e.changedTouches && e.changedTouches.length ? e.changedTouches[0] : e);
-    const xNorm = (touch.clientX - rect.left) / rect.width;
-    const yNorm = (touch.clientY - rect.top) / rect.height;
-    return { x: Math.max(0, Math.min(1, xNorm)), y: Math.max(0, Math.min(1, yNorm)) };
+
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const inverse = ctm.inverse();
+    const pt = new DOMPoint(touch.clientX, touch.clientY).matrixTransform(inverse);
+
+    return {
+      x: Math.max(0, Math.min(1, pt.x / VB_W)),
+      y: Math.max(0, Math.min(1, pt.y / VB_H)),
+    };
   };
 
   const hitTestArrow = (pt) => {
@@ -737,22 +749,7 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
     }
   };
 
-  // ---- Gesto de deslizar (solo en modo "select") para abrir/cerrar el panel de notas ----
-  const swipeRef = useRef(null);
-  const onCourtTouchStart = (e) => {
-    if (tool !== "select") return;
-    const t = e.touches?.[0];
-    if (t) swipeRef.current = { startY: t.clientY, moved: false };
-  };
-  const onCourtTouchMove = (e) => {
-    if (tool !== "select" || !swipeRef.current) return;
-    const t = e.touches?.[0];
-    if (!t) return;
-    const deltaY = swipeRef.current.startY - t.clientY;
-    if (deltaY > 35 && !notesOpen) { setNotesOpen(true); swipeRef.current.moved = true; }
-    if (deltaY < -35 && notesOpen) { setNotesOpen(false); swipeRef.current.moved = true; }
-  };
-  const onCourtTouchEnd = () => { swipeRef.current = null; };
+  // ---- Panel de notas: se abre/cierra con el botón "A" de la barra de herramientas ----
 
   return (
     <div className="flex-1 flex flex-col min-h-0 relative">
@@ -763,13 +760,20 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         <ToolBtn icon={MoveRight} active={tool === "arrow"} onClick={() => setTool("arrow")} compact />
         <ToolBtn icon={Pencil} active={tool === "draw"} onClick={() => setTool("draw")} compact />
         <ToolBtn icon={Eraser} active={tool === "erase"} onClick={() => setTool("erase")} compact />
+        <button
+          onClick={() => setNotesOpen(o => !o)}
+          className={`px-2 py-1.5 rounded-lg flex-shrink-0 text-sm font-bold ${notesOpen ? "bg-emerald-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
+          title="Anotaciones"
+        >
+          A
+        </button>
         <button onClick={() => setShowColorPicker(s => !s)} className="relative p-1.5 rounded-lg hover:bg-slate-100 flex-shrink-0">
           <span className="w-4 h-4 rounded-full border border-slate-300 block" style={{ backgroundColor: color }} />
         </button>
         {selectedArrowId && (
           <button onClick={deleteSelectedArrow} className="p-1.5 rounded-lg bg-red-50 text-red-500 flex-shrink-0"><Trash2 size={14} /></button>
         )}
-        <button onClick={clearAll} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 flex-shrink-0"><X size={14} /></button>
+        <button onClick={clearAll} className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 flex-shrink-0"><Trash2 size={16} /></button>
       </div>
 
       {showColorPicker && (
@@ -786,9 +790,6 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         ref={courtWrapRef}
         className={`flex items-center justify-center p-1 min-h-0 ${isTenis ? "bg-orange-100" : "bg-slate-100"}`}
         style={{ flexBasis: notesOpen ? "52%" : "auto", flexGrow: notesOpen ? 0 : 1, minHeight: 0, transition: "flex-basis 0.25s ease" }}
-        onTouchStart={onCourtTouchStart}
-        onTouchMove={onCourtTouchMove}
-        onTouchEnd={onCourtTouchEnd}
       >
         <svg
           ref={svgRef}
@@ -815,31 +816,27 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         </svg>
       </div>
 
-      <div
-        className={`border-t border-slate-200 bg-white flex-shrink-0 flex flex-col ${notesOpen ? "flex-1" : ""}`}
-        style={{ flexBasis: notesOpen ? "48%" : "0px", minHeight: 0, overflow: "hidden", transition: "flex-basis 0.25s ease" }}
-      >
-        <button onClick={() => setNotesOpen(o => !o)} className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-slate-400 flex-shrink-0 border-b border-slate-100">
-          <span className="block w-8 h-1 rounded-full bg-slate-300" />
-        </button>
-        <div className="px-3 pb-3 pt-2 flex-1 min-h-0 flex flex-col">
-          <label className="text-xs font-semibold text-slate-500 mb-1 block">Anotaciones</label>
-          <textarea
-            value={project.notes}
-            onChange={(e) => onChange(p => ({ ...p, notes: e.target.value }))}
-            placeholder="Escribe aquí tus notas sobre esta jugada o ejercicio..."
-            className="w-full flex-1 resize-none border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
-          />
-        </div>
-      </div>
-
-      {!notesOpen && (
-        <button
-          onClick={() => setNotesOpen(true)}
-          className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-sm border border-slate-200 rounded-full px-3 py-1 text-xs text-slate-500 shadow-sm flex items-center gap-1 z-10"
+      {notesOpen && (
+        <div
+          className="border-t border-slate-200 bg-white flex-shrink-0 flex flex-col flex-1"
+          style={{ flexBasis: "48%", minHeight: 0, overflow: "hidden" }}
         >
-          <ChevronUp size={12} /> Anotaciones
-        </button>
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 flex-shrink-0">
+            <label className="text-xs font-semibold text-slate-500">Anotaciones</label>
+            <button onClick={() => setNotesOpen(false)} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-slate-100">
+              <X size={12} /> Cerrar
+            </button>
+          </div>
+          <div className="px-3 pb-3 pt-2 flex-1 min-h-0 flex flex-col">
+            <textarea
+              value={project.notes}
+              onChange={(e) => onChange(p => ({ ...p, notes: e.target.value }))}
+              placeholder="Escribe aquí tus notas sobre esta jugada o ejercicio..."
+              className="w-full flex-1 resize-none border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+              autoFocus
+            />
+          </div>
+        </div>
       )}
     </div>
   );
