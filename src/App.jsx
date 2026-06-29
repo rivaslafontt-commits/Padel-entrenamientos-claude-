@@ -372,7 +372,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-full w-full bg-slate-50 flex flex-col font-sans">
+    <div className="bg-slate-50 flex flex-col font-sans" style={{ height: "100vh", maxHeight: "100vh", width: "100%", overflow: "hidden" }}>
       {dataError && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-700 text-xs px-3 py-2 flex items-center justify-between">
           <span>{dataError}</span>
@@ -611,7 +611,7 @@ function ArrowSvg({ x1, y1, x2, y2, color, strokeWidth = 3, headSize = 10, selec
 // Un cono de entrenamiento real mide ~20cm de base. Una pista de pádel mide 10m de largo.
 // 0.2 / 10 = 2% del largo de la pista. Lo usamos como referencia de tamaño (proporción
 // del lado más largo del campo de juego, VB_H), igual para pádel y tenis.
-const CONE_SIZE_RATIO = 0.022;
+const CONE_SIZE_RATIO = 0.033;
 
 function ConeSvg({ x, y, color, size = 10, selected }) {
   const halfBase = size * 0.5;
@@ -834,8 +834,8 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
   // ---- Panel de notas: se abre/cierra con el botón "A" de la barra de herramientas ----
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 relative" style={{ height: "100%" }}>
-      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white border-b border-slate-200 z-20 flex-shrink-0 flex-wrap">
+    <div className="flex-1 flex flex-col min-h-0 relative" style={{ height: "100%", maxHeight: "100%" }}>
+      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-white border-b border-slate-200 flex-wrap" style={{ flex: "0 0 auto", position: "sticky", top: 0, zIndex: 30 }}>
         <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 flex-shrink-0"><ArrowLeft size={16} /></button>
         <h1 className="text-sm font-bold text-slate-800 flex-1 truncate min-w-0">{project.name}</h1>
         <ToolBtn icon={MousePointer2} active={tool === "select"} onClick={() => setTool("select")} compact />
@@ -860,7 +860,7 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
       </div>
 
       {showColorPicker && (
-        <div className="px-2 py-1.5 bg-white border-b border-slate-200 flex items-center gap-2 z-20 flex-shrink-0">
+        <div className="px-2 py-1.5 bg-white border-b border-slate-200 flex items-center gap-2" style={{ flex: "0 0 auto" }}>
           {COLORS.map(c => (
             <button key={c} onClick={() => { setColor(c); if (selectedConeId) recolorSelectedCone(c); setShowColorPicker(false); }}
               className="w-6 h-6 rounded-full border-2 transition-transform"
@@ -871,8 +871,8 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
 
       <div
         ref={courtWrapRef}
-        className={`flex items-center justify-center p-1 min-h-0 ${isTenis ? "bg-orange-100" : "bg-slate-100"}`}
-        style={{ flexBasis: notesOpen ? "52%" : "auto", flexGrow: notesOpen ? 0 : 1, minHeight: 0, transition: "flex-basis 0.25s ease" }}
+        className={`flex items-center justify-center p-1 ${isTenis ? "bg-orange-100" : "bg-slate-100"}`}
+        style={{ flex: notesOpen ? "0 0 52%" : "1 1 auto", minHeight: 0, overflow: "hidden" }}
       >
         <svg
           ref={svgRef}
@@ -904,8 +904,8 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
 
       {notesOpen && (
         <div
-          className="border-t border-slate-200 bg-white flex-shrink-0 flex flex-col flex-1"
-          style={{ flexBasis: "48%", minHeight: 0, overflow: "hidden" }}
+          className="border-t border-slate-200 bg-white flex flex-col"
+          style={{ flex: "0 0 48%", minHeight: 0, overflow: "hidden" }}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 flex-shrink-0">
             <label className="text-xs font-semibold text-slate-500">Anotaciones</label>
