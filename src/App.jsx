@@ -33,11 +33,16 @@ function makeSupabase(url, key) {
     },
     getRefreshToken() { return refreshToken; },
 
-    async signInWithOtp(email, redirectTo) {
+    async signInWithOtp(email, redirectTo, fullName) {
       const res = await fetch(`${url}/auth/v1/otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: key },
-        body: JSON.stringify({ email, create_user: true, options: { email_redirect_to: redirectTo } }),
+        body: JSON.stringify({
+          email,
+          create_user: true,
+          data: fullName ? { full_name: fullName } : undefined,
+          options: { email_redirect_to: redirectTo },
+        }),
       });
       if (!res.ok) {
         let data = {};
@@ -125,6 +130,7 @@ export default function App() {
   const [authState, setAuthState] = useState("loading");
   const [user, setUser] = useState(null);
   const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [linkSentTo, setLinkSentTo] = useState("");
@@ -213,10 +219,11 @@ export default function App() {
 
   const sendLink = async () => {
     setAuthError("");
+    if (!name.trim()) { setAuthError("Introduce tu nombre."); return; }
     if (!email.trim() || !email.includes("@")) { setAuthError("Introduce un email válido."); return; }
     setAuthBusy(true);
     try {
-      await sb.signInWithOtp(email.trim(), window.location.origin + window.location.pathname);
+      await sb.signInWithOtp(email.trim(), window.location.origin + window.location.pathname, name.trim());
       setLinkSentTo(email.trim());
       setAuthState("linkSent");
     } catch (e) {
@@ -230,7 +237,7 @@ export default function App() {
     await sb.signOut();
     sessionStore.clear();
     setUser(null); setFolders([]); setDataLoaded(false);
-    setView({ screen: "home" }); setEmail(""); setAuthError(""); setLinkSentTo("");
+    setView({ screen: "home" }); setEmail(""); setName(""); setAuthError(""); setLinkSentTo("");
     setAuthState("signedOut");
   };
 
@@ -250,7 +257,7 @@ export default function App() {
     try {
       const [row] = await sb.insert("projects", { folder_id: folderId, user_id: user.id, name, sport, notes: "", arrows: [], strokes: [], cones: [] });
       setFolders(fs => fs.map(f => f.id === folderId ? { ...f, projects: f.projects.map(p => p.id === tempId ? { ...p, id: row.id } : p) } : f));
-    } catch (e) { setDataError("No se pudo guardar el proyecto en el servidor."); }
+    } catch (e) { setDataError("No se pudo guardar el entreno en el servidor."); }
   };
 
   const deleteFolder = async (folderId) => {
@@ -336,6 +343,11 @@ export default function App() {
 
           {authState === "signedOut" && (
             <>
+              <label className="text-xs font-semibold text-slate-500 mb-1 block">Tu nombre</label>
+              <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 mb-3">
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+                  placeholder="Tu nombre" className="flex-1 text-sm outline-none" />
+              </div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">Tu email</label>
               <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 mb-3">
                 <Mail size={16} className="text-slate-400" />
@@ -366,7 +378,7 @@ export default function App() {
                 ¿Email equivocado? Pulsa abajo para escribir uno nuevo — el enlace anterior dejará de ser necesario.
               </p>
               <button
-                onClick={() => { setAuthState("signedOut"); setAuthError(""); setEmail(""); }}
+                onClick={() => { setAuthState("signedOut"); setAuthError(""); setEmail(""); setName(""); }}
                 className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-lg"
               >
                 Usar otro email
@@ -393,7 +405,7 @@ export default function App() {
 
       {dataLoaded && view.screen === "home" && (
         <HomeScreen
-          folders={folders} userEmail={user?.email}
+          folders={folders} userName={user?.user_metadata?.full_name} userEmail={user?.email}
           onOpenFolder={(id) => setView({ screen: "folder", folderId: id })}
           onNewFolder={() => {
             if (plan === "free" && folders.length >= FREE_MAX_FOLDERS) {
@@ -440,7 +452,7 @@ export default function App() {
         <Modal title="Nueva carpeta" value={inputValue} setValue={setInputValue} onConfirm={confirmNewFolder} onCancel={closeModal} />
       )}
       {(modal?.type === "renameFolder" || modal?.type === "renameProject") && (
-        <Modal title={modal.type === "renameFolder" ? "Renombrar carpeta" : "Renombrar proyecto"} value={inputValue} setValue={setInputValue} onConfirm={confirmRename} onCancel={closeModal} />
+        <Modal title={modal.type === "renameFolder" ? "Renombrar carpeta" : "Renombrar entreno"} value={inputValue} setValue={setInputValue} onConfirm={confirmRename} onCancel={closeModal} />
       )}
       {modal?.type === "newProject" && (
         <NewProjectModal value={inputValue} setValue={setInputValue} onChoose={confirmNewProject} onCancel={closeModal} />
@@ -456,7 +468,7 @@ export default function App() {
 function UpgradeModal({ reason, onCancel }) {
   const text = reason === "folders"
     ? `Tu plan gratuito permite hasta ${FREE_MAX_FOLDERS} carpetas. Pásate a premium para crear carpetas sin límite.`
-    : `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} pistas por carpeta. Pásate a premium para crear pistas sin límite.`;
+    : `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} entrenos por carpeta. Pásate a premium para crear entrenos sin límite.`;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm">
@@ -479,13 +491,13 @@ function UpgradeModal({ reason, onCancel }) {
 }
 
 // =============== HOME SCREEN ===============
-function HomeScreen({ folders, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
+function HomeScreen({ folders, userName, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
   return (
     <div className="flex-1 flex flex-col">
       <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800 tracking-tight"><img src="/tedel-logo.png" alt="Tedel" className="h-6 w-auto" /> Pádel & Tenis Coach</h1>
-          {userEmail && <p className="text-xs text-slate-400">{userEmail}</p>}
+          {(userName || userEmail) && <p className="text-xs text-slate-400">{userName || userEmail}</p>}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={onNewFolder} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">
@@ -509,7 +521,7 @@ function HomeScreen({ folders, userEmail, onOpenFolder, onNewFolder, onDeleteFol
                 className="group relative bg-white rounded-xl border border-slate-200 p-4 flex flex-col items-center gap-2 cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all">
                 <Folder size={36} className="text-emerald-500" strokeWidth={1.5} />
                 <span className="text-sm font-medium text-slate-700 text-center line-clamp-2">{folder.name}</span>
-                <span className="text-xs text-slate-400">{folder.projects.length} proyecto{folder.projects.length !== 1 ? "s" : ""}</span>
+                <span className="text-xs text-slate-400">{folder.projects.length} entreno{folder.projects.length !== 1 ? "s" : ""}</span>
                 <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={(e) => { e.stopPropagation(); onRenameFolder(folder.id, folder.name); }} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-500"><Pencil size={12} /></button>
                   <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar la carpeta "${folder.name}" y todo su contenido?`)) onDeleteFolder(folder.id); }} className="p-1.5 bg-slate-100 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500"><Trash2 size={12} /></button>
@@ -531,7 +543,7 @@ function FolderScreen({ folder, onBack, onOpenProject, onNewProject, onDeletePro
         <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ArrowLeft size={18} /></button>
         <h1 className="text-base font-bold text-slate-800 flex-1 truncate">{folder.name}</h1>
         <button onClick={onNewProject} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">
-          <FilePlus size={16} /> Proyecto
+          <FilePlus size={16} /> Entreno
         </button>
       </header>
 
@@ -539,7 +551,7 @@ function FolderScreen({ folder, onBack, onOpenProject, onNewProject, onDeletePro
         {folder.projects.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 gap-2 py-16">
             <FilePlus size={48} strokeWidth={1.5} />
-            <p className="text-sm">Sin proyectos en esta carpeta.</p>
+            <p className="text-sm">Sin entrenos en esta carpeta.</p>
             <p className="text-xs">Crea uno para empezar a dibujar tu táctica.</p>
           </div>
         ) : (
@@ -556,7 +568,7 @@ function FolderScreen({ folder, onBack, onOpenProject, onNewProject, onDeletePro
                 </div>
                 <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={(e) => { e.stopPropagation(); onRenameProject(project.id, project.name); }} className="p-1.5 bg-white/90 hover:bg-slate-200 rounded-md text-slate-500 shadow-sm"><Pencil size={12} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar el proyecto "${project.name}"?`)) onDeleteProject(project.id); }} className="p-1.5 bg-white/90 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500 shadow-sm"><Trash2 size={12} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar el entreno "${project.name}"?`)) onDeleteProject(project.id); }} className="p-1.5 bg-white/90 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500 shadow-sm"><Trash2 size={12} /></button>
                 </div>
               </div>
             ))}
@@ -1025,7 +1037,7 @@ function NewProjectModal({ value, setValue, onChoose, onCancel }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onCancel}>
       <div className="bg-white rounded-xl p-4 w-full max-w-sm shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">Nuevo proyecto</h3>
+        <h3 className="text-sm font-semibold text-slate-800 mb-3">Nuevo entreno</h3>
         <label className="text-xs font-semibold text-slate-500 mb-1 block">Nombre (opcional)</label>
         <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
           placeholder="Ej: Saque y volea"
