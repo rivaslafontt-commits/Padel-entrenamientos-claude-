@@ -11,6 +11,10 @@ const SUPABASE_ANON_KEY = "sb_publishable_8CrcBtHiApBXq22DeDru7g_UpTET0GM";
 const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#111827"];
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+// ---- Límites del plan gratuito (Paso 1 de la versión free/premium) ----
+const FREE_MAX_FOLDERS = 2;
+const FREE_MAX_PROJECTS_PER_FOLDER = 3;
+
 // ---- Mini cliente REST para Supabase (sin librerías externas) ----
 function makeSupabase(url, key) {
   let accessToken = null;
@@ -135,6 +139,9 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [inputValue, setInputValue] = useState("");
   const [selectedArrowId, setSelectedArrowId] = useState(null);
+
+  // "premium" solo si Supabase lo marca explícitamente en user_metadata; cualquier otro caso (incluido null) es "free".
+  const plan = user?.user_metadata?.plan === "premium" ? "premium" : "free";
 
   useEffect(() => {
     (async () => {
@@ -323,7 +330,7 @@ export default function App() {
     return (
       <div className="h-full w-full flex items-center justify-center bg-slate-50 p-4">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 w-full max-w-sm">
-          <div className="flex items-center justify-center mb-4"><span className="text-3xl">🎾</span></div>
+          <div className="flex items-center justify-center mb-4"><img src="/tedel-logo.png" alt="Tedel" className="h-12 w-auto" /></div>
           <h1 className="text-lg font-bold text-slate-800 text-center mb-1">Pádel & Tenis Coach</h1>
           <p className="text-sm text-slate-500 text-center mb-6">Pizarras tácticas para entrenadores</p>
 
@@ -388,7 +395,13 @@ export default function App() {
         <HomeScreen
           folders={folders} userEmail={user?.email}
           onOpenFolder={(id) => setView({ screen: "folder", folderId: id })}
-          onNewFolder={() => setModal({ type: "newFolder" })}
+          onNewFolder={() => {
+            if (plan === "free" && folders.length >= FREE_MAX_FOLDERS) {
+              setModal({ type: "upgrade", reason: "folders" });
+            } else {
+              setModal({ type: "newFolder" });
+            }
+          }}
           onDeleteFolder={deleteFolder}
           onRenameFolder={(id, name) => { setModal({ type: "renameFolder", folderId: id }); setInputValue(name); }}
           onSignOut={doSignOut}
@@ -400,7 +413,13 @@ export default function App() {
           folder={currentFolder}
           onBack={() => setView({ screen: "home" })}
           onOpenProject={(id) => setView({ screen: "project", folderId: currentFolder.id, projectId: id })}
-          onNewProject={() => setModal({ type: "newProject", folderId: currentFolder.id, step: "choose" })}
+          onNewProject={() => {
+            if (plan === "free" && currentFolder.projects.length >= FREE_MAX_PROJECTS_PER_FOLDER) {
+              setModal({ type: "upgrade", reason: "projects" });
+            } else {
+              setModal({ type: "newProject", folderId: currentFolder.id, step: "choose" });
+            }
+          }}
           onDeleteProject={(pid) => deleteProject(currentFolder.id, pid)}
           onRenameProject={(pid, name) => { setModal({ type: "renameProject", folderId: currentFolder.id, projectId: pid }); setInputValue(name); }}
         />
@@ -426,6 +445,35 @@ export default function App() {
       {modal?.type === "newProject" && (
         <NewProjectModal value={inputValue} setValue={setInputValue} onChoose={confirmNewProject} onCancel={closeModal} />
       )}
+      {modal?.type === "upgrade" && (
+        <UpgradeModal reason={modal.reason} onCancel={closeModal} />
+      )}
+    </div>
+  );
+}
+
+// =============== MODAL DE LÍMITE FREE / UPGRADE ===============
+function UpgradeModal({ reason, onCancel }) {
+  const text = reason === "folders"
+    ? `Tu plan gratuito permite hasta ${FREE_MAX_FOLDERS} carpetas. Pásate a premium para crear carpetas sin límite.`
+    : `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} pistas por carpeta. Pásate a premium para crear pistas sin límite.`;
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm">
+        <h3 className="text-base font-bold text-slate-800 mb-2">Has llegado al límite del plan gratuito</h3>
+        <p className="text-sm text-slate-600 mb-5">{text}</p>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-lg">
+            Ahora no
+          </button>
+          <button
+            onClick={() => { /* TODO: aquí conectaremos el checkout de Stripe en el siguiente paso */ onCancel(); }}
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium py-2.5 rounded-lg"
+          >
+            Hazte premium
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -436,7 +484,7 @@ function HomeScreen({ folders, userEmail, onOpenFolder, onNewFolder, onDeleteFol
     <div className="flex-1 flex flex-col">
       <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight">🎾 Pádel & Tenis Coach</h1>
+          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800 tracking-tight"><img src="/tedel-logo.png" alt="Tedel" className="h-6 w-auto" /> Pádel & Tenis Coach</h1>
           {userEmail && <p className="text-xs text-slate-400">{userEmail}</p>}
         </div>
         <div className="flex items-center gap-2">
@@ -884,6 +932,16 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
           onTouchStart={handleStart} onTouchMove={handleMove} onTouchEnd={handleEnd}
         >
           {isTenis ? <TennisCourtLines w={VB_W} h={VB_H} /> : <PadelCourtLines w={VB_W} h={VB_H} />}
+          <image
+            href="/tedel-watermark.png"
+            x={VB_W / 2 - VB_W * 0.17}
+            y={VB_H / 2 - VB_W * 0.17}
+            width={VB_W * 0.34}
+            height={VB_W * 0.34}
+            opacity={0.08}
+            style={{ pointerEvents: "none" }}
+            preserveAspectRatio="xMidYMid meet"
+          />
           {project.strokes.map(s => (
             <polyline key={s.id} points={s.points.map(p => `${p.x * VB_W},${p.y * VB_H}`).join(" ")}
               fill="none" stroke={s.color} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
