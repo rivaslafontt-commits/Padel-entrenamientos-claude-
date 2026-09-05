@@ -761,22 +761,70 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       // Paredes laterales decorativas (siguiendo el trapecio, como el vallado de una pista real)
       const topW = flat.width * topRatio, botW = flat.width;
       const topX = sideMargin + (flat.width - topW) / 2, botX = sideMargin + (flat.width - botW) / 2;
-      wctx.fillStyle = "rgba(15,23,42,0.85)";
-      wctx.beginPath();
-      wctx.moveTo(0, wallH); wctx.lineTo(topX, wallH); wctx.lineTo(botX, wallH + flat.height); wctx.lineTo(0, wallH + flat.height);
-      wctx.closePath(); wctx.fill();
-      wctx.beginPath();
-      wctx.moveTo(destW, wallH); wctx.lineTo(topX + topW, wallH); wctx.lineTo(botX + botW, wallH + flat.height); wctx.lineTo(destW, wallH + flat.height);
-      wctx.closePath(); wctx.fill();
 
-      // Banda superior tipo "pared de fondo" con el nombre de Tedel
+      const drawFenceWall = (points) => {
+        wctx.save();
+        wctx.beginPath();
+        points.forEach(([px, py], i) => (i === 0 ? wctx.moveTo(px, py) : wctx.lineTo(px, py)));
+        wctx.closePath();
+        wctx.clip();
+        const grad = wctx.createLinearGradient(0, wallH, 0, wallH + flat.height);
+        grad.addColorStop(0, "#1e293b");
+        grad.addColorStop(1, "#0f172a");
+        wctx.fillStyle = grad;
+        wctx.fillRect(0, 0, destW, destH);
+        if (!isTenis) {
+          // malla tipo valla metálica (solo pádel, para que se parezca a una pista real)
+          wctx.strokeStyle = "rgba(255,255,255,0.10)";
+          wctx.lineWidth = Math.max(1, rs * 0.35);
+          const spacing = 11 * rs;
+          for (let i = -destH; i < destW + destH; i += spacing) {
+            wctx.beginPath(); wctx.moveTo(i, 0); wctx.lineTo(i + destH, destH); wctx.stroke();
+            wctx.beginPath(); wctx.moveTo(i, destH); wctx.lineTo(i + destH, 0); wctx.stroke();
+          }
+        }
+        wctx.restore();
+      };
+      drawFenceWall([[0, wallH], [topX, wallH], [botX, wallH + flat.height], [0, wallH + flat.height]]);
+      drawFenceWall([[destW, wallH], [topX + topW, wallH], [botX + botW, wallH + flat.height], [destW, wallH + flat.height]]);
+
+      // Banda superior tipo "pared de fondo" con el logo real de Tedel (en blanco, para que se lea sobre el fondo oscuro)
       wctx.fillStyle = "#0f172a";
       wctx.fillRect(0, 0, destW, wallH);
-      wctx.fillStyle = "rgba(255,255,255,0.9)";
-      wctx.font = `bold ${Math.round(wallH * 0.5)}px sans-serif`;
-      wctx.textAlign = "center";
-      wctx.textBaseline = "middle";
-      wctx.fillText("TEDEL", destW / 2, wallH / 2);
+      const whiteLogoDataUrl = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = img.width; c.height = img.height;
+          const cc = c.getContext("2d");
+          cc.drawImage(img, 0, 0);
+          cc.globalCompositeOperation = "source-in";
+          cc.fillStyle = "#ffffff";
+          cc.fillRect(0, 0, c.width, c.height);
+          resolve(c.toDataURL("image/png"));
+        };
+        img.onerror = () => resolve(null);
+        img.src = "/tedel-logo.png";
+      });
+      if (whiteLogoDataUrl) {
+        const whiteLogoImg = await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => resolve(null);
+          img.src = whiteLogoDataUrl;
+        });
+        if (whiteLogoImg) {
+          const lh = wallH * 0.55;
+          const lw = lh * (whiteLogoImg.width / whiteLogoImg.height);
+          wctx.drawImage(whiteLogoImg, destW / 2 - lw / 2, wallH / 2 - lh / 2, lw, lh);
+        }
+      } else {
+        wctx.fillStyle = "rgba(255,255,255,0.9)";
+        wctx.font = `bold ${Math.round(wallH * 0.5)}px sans-serif`;
+        wctx.textAlign = "center";
+        wctx.textBaseline = "middle";
+        wctx.fillText("TEDEL", destW / 2, wallH / 2);
+      }
 
       const courtImgData = warped.toDataURL("image/png");
       const courtAspect = destH / destW;
@@ -802,23 +850,25 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       const drawHeader = (compact) => {
         let hy = 14;
-        if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, compact ? 22 : 30, compact ? 11 : 15);
-        if (coachName) {
-          doc.setFontSize(10);
-          doc.setTextColor(120);
-          doc.text(coachName, pageW - marginX, hy, { align: "right" });
-        }
+        if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, compact ? 24 : 34, compact ? 12 : 17);
         doc.setFontSize(9);
         doc.setTextColor(150);
-        doc.text(new Date().toLocaleDateString("es-ES"), pageW - marginX, hy + 5, { align: "right" });
-        hy += compact ? 14 : 20;
-        doc.setFontSize(compact ? 13 : 17);
+        doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, hy, { align: "right" });
+        if (coachName) {
+          doc.setFontSize(9);
+          doc.setTextColor(150);
+          doc.text(coachName, pageW - marginX, hy + 5, { align: "right" });
+        }
+        hy += compact ? 16 : 24;
+        doc.setFontSize(8.5);
+        doc.setTextColor(5, 150, 105);
+        doc.text((isTenis ? "TENIS" : "PÁDEL") + " · ENTRENO", marginX, hy);
+        hy += compact ? 5 : 7;
+        doc.setFont(undefined, "bold");
+        doc.setFontSize(compact ? 15 : 22);
         doc.setTextColor(15, 23, 42);
-        doc.text(project.name || "Entreno", marginX, hy);
-        hy += 5.5;
-        doc.setFontSize(9.5);
-        doc.setTextColor(100);
-        doc.text(isTenis ? "Tenis" : "Pádel", marginX, hy);
+        doc.text((project.name || "Entreno").toUpperCase(), marginX, hy);
+        doc.setFont(undefined, "normal");
         doc.setDrawColor(226, 232, 240);
         doc.line(marginX, hy + 4, pageW - marginX, hy + 4);
         return hy + 10;
