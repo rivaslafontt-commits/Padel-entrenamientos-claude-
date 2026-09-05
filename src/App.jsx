@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown, Triangle } from "lucide-react";
+import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown, Triangle, Download, Crown } from "lucide-react";
 
 // ============================================================
 // CONFIGURA AQUÍ TUS CLAVES DE SUPABASE
@@ -440,6 +440,9 @@ export default function App() {
       {dataLoaded && view.screen === "project" && currentProject && (
         <ProjectScreen
           project={currentProject}
+          plan={plan}
+          coachName={user?.user_metadata?.full_name || ""}
+          onExportBlocked={() => setModal({ type: "upgrade", reason: "pdf" })}
           tool={tool} setTool={setTool} color={color} setColor={setColor}
           showColorPicker={showColorPicker} setShowColorPicker={setShowColorPicker}
           selectedArrowId={selectedArrowId} setSelectedArrowId={setSelectedArrowId}
@@ -468,7 +471,9 @@ export default function App() {
 function UpgradeModal({ reason, onCancel }) {
   const text = reason === "folders"
     ? `Tu plan gratuito permite hasta ${FREE_MAX_FOLDERS} carpetas. Pásate a premium para crear carpetas sin límite.`
-    : `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} entrenos por carpeta. Pásate a premium para crear entrenos sin límite.`;
+    : reason === "projects"
+    ? `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} entrenos por carpeta. Pásate a premium para crear entrenos sin límite.`
+    : `Exportar a PDF es una función premium. Pásate a premium para descargar tus pizarras en PDF.`;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm">
@@ -700,13 +705,94 @@ function ConeSvg({ x, y, color, size = 10, selected }) {
 const VB_W = 300;
 const VB_H = 480;
 
-function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicker, setShowColorPicker, selectedArrowId, setSelectedArrowId, onBack, onChange }) {
+function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setTool, color, setColor, showColorPicker, setShowColorPicker, selectedArrowId, setSelectedArrowId, onBack, onChange }) {
   const svgRef = useRef(null);
   const courtWrapRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const isTenis = project.sport === "tenis";
   const cones = project.cones || [];
+
+  // Genera un PDF de la pizarra actual: logo + nombre del coach arriba, la pista tal cual
+  // se ve (con flechas, conos y marca de agua) y las anotaciones debajo. Solo plan premium.
+  const exportPdf = async () => {
+    if (plan !== "premium") { onExportBlocked(); return; }
+    setExporting(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+
+      const svgString = new XMLSerializer().serializeToString(svgRef.current);
+      const svgDataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString)));
+
+      const scale = 3;
+      const courtCanvas = document.createElement("canvas");
+      courtCanvas.width = VB_W * scale;
+      courtCanvas.height = VB_H * scale;
+      const ctx = courtCanvas.getContext("2d");
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0, courtCanvas.width, courtCanvas.height); resolve(); };
+        img.onerror = reject;
+        img.src = svgDataUrl;
+      });
+      const courtImgData = courtCanvas.toDataURL("image/png");
+
+      const logoImgData = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = img.width; c.height = img.height;
+          c.getContext("2d").drawImage(img, 0, 0);
+          resolve(c.toDataURL("image/png"));
+        };
+        img.onerror = () => resolve(null);
+        img.src = "/tedel-logo.png";
+      });
+
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      let y = 14;
+
+      if (logoImgData) doc.addImage(logoImgData, "PNG", 12, y - 5, 30, 15);
+      if (coachName) {
+        doc.setFontSize(11);
+        doc.setTextColor(90);
+        doc.text(coachName, pageW - 12, y + 3, { align: "right" });
+      }
+      y += 20;
+
+      doc.setFontSize(16);
+      doc.setTextColor(20);
+      doc.text(project.name || "Entreno", 12, y);
+      y += 6;
+      doc.setFontSize(10);
+      doc.setTextColor(120);
+      doc.text(`${isTenis ? "Tenis" : "Pádel"} · ${new Date().toLocaleDateString("es-ES")}`, 12, y);
+      y += 8;
+
+      const imgW = pageW - 24;
+      const imgH = imgW * (VB_H / VB_W);
+      doc.addImage(courtImgData, "PNG", 12, y, imgW, imgH);
+      y += imgH + 10;
+
+      if (project.notes && project.notes.trim()) {
+        doc.setFontSize(11);
+        doc.setTextColor(20);
+        doc.text("Anotaciones", 12, y);
+        y += 5;
+        doc.setFontSize(10);
+        doc.setTextColor(80);
+        doc.text(doc.splitTextToSize(project.notes, pageW - 24), 12, y);
+      }
+
+      doc.save(`${(project.name || "entreno").replace(/[^\w\-]+/g, "_")}.pdf`);
+    } catch (e) {
+      alert("No se pudo generar el PDF. Inténtalo de nuevo.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Convierte coordenadas de pantalla a coordenadas normalizadas (0-1) dentro del SVG,
   // usando la matriz de transformación nativa del navegador (getScreenCTM). Esto es
@@ -912,6 +998,15 @@ function ProjectScreen({ project, tool, setTool, color, setColor, showColorPicke
         </button>
         <button onClick={() => setShowColorPicker(s => !s)} className="relative p-1.5 rounded-lg hover:bg-slate-100 flex-shrink-0">
           <span className="w-4 h-4 rounded-full border border-slate-300 block" style={{ backgroundColor: color }} />
+        </button>
+        <button
+          onClick={exportPdf}
+          disabled={exporting}
+          title={plan === "premium" ? "Exportar a PDF" : "Exportar a PDF (premium)"}
+          className="relative p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 disabled:opacity-50 flex-shrink-0"
+        >
+          {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          {plan !== "premium" && <Crown size={10} className="absolute -top-1 -right-1 text-amber-500" fill="currentColor" />}
         </button>
         {(selectedArrowId || selectedConeId) && (
           <button onClick={deleteSelectedArrow} className="p-1.5 rounded-lg bg-red-50 text-red-500 flex-shrink-0"><Trash2 size={14} /></button>
