@@ -714,122 +714,16 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
   const isTenis = project.sport === "tenis";
   const cones = project.cones || [];
 
-  // Genera un PDF de la pizarra actual: cabecera con logo + nombre del coach + entreno,
-  // la pista con efecto de profundidad (solo lo que el entrenador ha dibujado, sin
-  // leyendas ni jugadores inventados) y las anotaciones debajo, paginando si hace falta.
-  // Solo disponible en plan premium.
+  // Genera el PDF ("informe de entreno"). En pádel usa la plantilla fotorrealista fija
+  // (misma imagen de fondo siempre) y solo escribe encima el texto real: nombre del
+  // entreno, fecha, coach y anotaciones. En tenis (sin plantilla propia todavía) usa
+  // el render dinámico de la pizarra real. Solo disponible en plan premium.
   const exportPdf = async () => {
     if (plan !== "premium") { onExportBlocked(); return; }
     setExporting(true);
     try {
       const { jsPDF } = await import("jspdf");
 
-      // ---- 1. Rasterizar la pizarra tal cual está (líneas de pista, flechas, conos, trazos, marca de agua) ----
-      const svgString = new XMLSerializer().serializeToString(svgRef.current);
-      const svgDataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString)));
-      const rs = 4; // escala de rasterizado para que se vea nítido
-      const flat = document.createElement("canvas");
-      flat.width = VB_W * rs;
-      flat.height = VB_H * rs;
-      const fctx = flat.getContext("2d");
-      await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => { fctx.drawImage(img, 0, 0, flat.width, flat.height); resolve(); };
-        img.onerror = reject;
-        img.src = svgDataUrl;
-      });
-
-      // ---- 2. Deformar en trapecio (más ancho abajo, más estrecho arriba) para dar sensación de profundidad ----
-      const wallH = Math.round(flat.height * 0.05);   // banda superior tipo "pared de fondo"
-      const sideMargin = Math.round(flat.width * 0.10); // margen lateral para las "paredes" del lateral
-      const destW = flat.width + sideMargin * 2;
-      const destH = flat.height + wallH;
-      const warped = document.createElement("canvas");
-      warped.width = destW;
-      warped.height = destH;
-      const wctx = warped.getContext("2d");
-
-      const topRatio = 0.66, bottomRatio = 1.0; // ancho relativo del campo: fondo (lejos) vs frente (cerca)
-      const step = 3;
-      for (let sy = 0; sy < flat.height; sy += step) {
-        const t = sy / flat.height;
-        const rowW = flat.width * (topRatio + (bottomRatio - topRatio) * t);
-        const rowX = sideMargin + (flat.width - rowW) / 2;
-        wctx.drawImage(flat, 0, sy, flat.width, step, rowX, wallH + sy, rowW, step + 1);
-      }
-
-      // Paredes laterales decorativas (siguiendo el trapecio, como el vallado de una pista real)
-      const topW = flat.width * topRatio, botW = flat.width;
-      const topX = sideMargin + (flat.width - topW) / 2, botX = sideMargin + (flat.width - botW) / 2;
-
-      const drawFenceWall = (points) => {
-        wctx.save();
-        wctx.beginPath();
-        points.forEach(([px, py], i) => (i === 0 ? wctx.moveTo(px, py) : wctx.lineTo(px, py)));
-        wctx.closePath();
-        wctx.clip();
-        const grad = wctx.createLinearGradient(0, wallH, 0, wallH + flat.height);
-        grad.addColorStop(0, "#1e293b");
-        grad.addColorStop(1, "#0f172a");
-        wctx.fillStyle = grad;
-        wctx.fillRect(0, 0, destW, destH);
-        if (!isTenis) {
-          // malla tipo valla metálica (solo pádel, para que se parezca a una pista real)
-          wctx.strokeStyle = "rgba(255,255,255,0.10)";
-          wctx.lineWidth = Math.max(1, rs * 0.35);
-          const spacing = 11 * rs;
-          for (let i = -destH; i < destW + destH; i += spacing) {
-            wctx.beginPath(); wctx.moveTo(i, 0); wctx.lineTo(i + destH, destH); wctx.stroke();
-            wctx.beginPath(); wctx.moveTo(i, destH); wctx.lineTo(i + destH, 0); wctx.stroke();
-          }
-        }
-        wctx.restore();
-      };
-      drawFenceWall([[0, wallH], [topX, wallH], [botX, wallH + flat.height], [0, wallH + flat.height]]);
-      drawFenceWall([[destW, wallH], [topX + topW, wallH], [botX + botW, wallH + flat.height], [destW, wallH + flat.height]]);
-
-      // Banda superior tipo "pared de fondo" con el logo real de Tedel (en blanco, para que se lea sobre el fondo oscuro)
-      wctx.fillStyle = "#0f172a";
-      wctx.fillRect(0, 0, destW, wallH);
-      const whiteLogoDataUrl = await new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          const c = document.createElement("canvas");
-          c.width = img.width; c.height = img.height;
-          const cc = c.getContext("2d");
-          cc.drawImage(img, 0, 0);
-          cc.globalCompositeOperation = "source-in";
-          cc.fillStyle = "#ffffff";
-          cc.fillRect(0, 0, c.width, c.height);
-          resolve(c.toDataURL("image/png"));
-        };
-        img.onerror = () => resolve(null);
-        img.src = "/tedel-logo.png";
-      });
-      if (whiteLogoDataUrl) {
-        const whiteLogoImg = await new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => resolve(null);
-          img.src = whiteLogoDataUrl;
-        });
-        if (whiteLogoImg) {
-          const lh = wallH * 0.55;
-          const lw = lh * (whiteLogoImg.width / whiteLogoImg.height);
-          wctx.drawImage(whiteLogoImg, destW / 2 - lw / 2, wallH / 2 - lh / 2, lw, lh);
-        }
-      } else {
-        wctx.fillStyle = "rgba(255,255,255,0.9)";
-        wctx.font = `bold ${Math.round(wallH * 0.5)}px sans-serif`;
-        wctx.textAlign = "center";
-        wctx.textBaseline = "middle";
-        wctx.fillText("TEDEL", destW / 2, wallH / 2);
-      }
-
-      const courtImgData = warped.toDataURL("image/png");
-      const courtAspect = destH / destW;
-
-      // ---- 3. Logo real de Tedel para la cabecera del documento ----
       const logoImgData = await new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -842,15 +736,136 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         img.src = "/tedel-logo.png";
       });
 
-      // ---- 4. Montar el documento ----
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
       const marginX = 14, marginBottom = 16;
+      let y;
 
-      const drawHeader = (compact) => {
+      if (!isTenis) {
+        // ---- Plantilla fija de pádel: cargar la imagen de fondo (banner + foto de pista) ----
+        const templateImg = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = "/pdf-template-padel.png";
+        });
+        const tplAspect = templateImg.height / templateImg.width;
+        const tplW = pageW;
+        const tplH = tplW * tplAspect;
+        doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
+
+        // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
+        // perspectiva real sobre la foto, usando las 4 esquinas de la pista de esta plantilla ----
+        // Esquinas medidas sobre pdf-template-padel.png (1054x805): fondo-izq, fondo-der, frente-der, frente-izq
+        const CORNERS = [[298, 268], [735, 265], [925, 635], [115, 638]];
+        const computeHomography = (dst) => {
+          const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
+          const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+          const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+          let g, h;
+          if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) { g = 0; h = 0; }
+          else {
+            const den = dx1 * dy2 - dx2 * dy1;
+            g = (dx3 * dy2 - dx2 * dy3) / den;
+            h = (dx1 * dy3 - dx3 * dy1) / den;
+          }
+          const a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, c = x0;
+          const d = y1 - y0 + g * y1, e = y3 - y0 + h * y3, f = y0;
+          return (u, v) => {
+            const denom = g * u + h * v + 1;
+            return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
+          };
+        };
+        const mapPt = computeHomography(CORNERS);
+
+        const ovCanvas = document.createElement("canvas");
+        ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
+        const octx = ovCanvas.getContext("2d");
+
+        // trazos a mano alzada
+        for (const s of project.strokes) {
+          if (!s.points || !s.points.length) continue;
+          octx.beginPath();
+          s.points.forEach((p, i) => {
+            const [px, py] = mapPt(p.x, p.y);
+            i === 0 ? octx.moveTo(px, py) : octx.lineTo(px, py);
+          });
+          octx.strokeStyle = s.color; octx.lineWidth = 5; octx.lineCap = "round"; octx.lineJoin = "round";
+          octx.stroke();
+        }
+        // flechas
+        for (const a of project.arrows) {
+          const [x1, y1] = mapPt(a.x1, a.y1);
+          const [x2, y2] = mapPt(a.x2, a.y2);
+          octx.strokeStyle = a.color; octx.lineWidth = 5.5; octx.lineCap = "round";
+          octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
+          const ang = Math.atan2(y2 - y1, x2 - x1), headLen = 18;
+          octx.beginPath();
+          octx.moveTo(x2, y2);
+          octx.lineTo(x2 - headLen * Math.cos(ang - Math.PI / 6), y2 - headLen * Math.sin(ang - Math.PI / 6));
+          octx.lineTo(x2 - headLen * Math.cos(ang + Math.PI / 6), y2 - headLen * Math.sin(ang + Math.PI / 6));
+          octx.closePath();
+          octx.fillStyle = a.color; octx.fill();
+        }
+        // conos: tamaño mayor cuanto más cerca (v alto) para respetar la perspectiva
+        for (const c of cones) {
+          const [px, py] = mapPt(c.x, c.y);
+          const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
+          octx.beginPath();
+          octx.moveTo(px, py - size);
+          octx.lineTo(px + size * 0.85, py + size * 0.8);
+          octx.lineTo(px - size * 0.85, py + size * 0.8);
+          octx.closePath();
+          octx.fillStyle = c.color; octx.fill();
+        }
+
+        doc.addImage(ovCanvas.toDataURL("image/png"), "PNG", 0, 0, tplW, tplH);
+
+        // Fecha, arriba a la derecha, sobre la plantilla
+        doc.setFontSize(9);
+        doc.setTextColor(90);
+        doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, 14, { align: "right" });
+        if (coachName) {
+          doc.setFontSize(9);
+          doc.setTextColor(140);
+          doc.text(coachName, pageW - marginX, 19, { align: "right" });
+        }
+
+        // Nombre del entreno, en el hueco de la cabecera junto al logo
+        let hy = 20;
+        doc.setFontSize(8.5);
+        doc.setTextColor(5, 150, 105);
+        doc.text("NOMBRE DEL ENTRENAMIENTO", marginX + 58, hy);
+        hy += 8;
+        doc.setFont(undefined, "bold");
+        doc.setFontSize(19);
+        doc.setTextColor(15, 23, 42);
+        doc.text((project.name || "Entreno").toUpperCase(), marginX + 58, hy);
+        doc.setFont(undefined, "normal");
+        doc.setDrawColor(226, 232, 240);
+        doc.line(marginX + 58, hy + 4, pageW - marginX, hy + 4);
+
+        y = tplH + 12;
+      } else {
+        // ---- Tenis: sin plantilla fotorrealista propia todavía, se mantiene el render dinámico de la pizarra ----
+        const svgString = new XMLSerializer().serializeToString(svgRef.current);
+        const svgDataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString)));
+        const rs = 4;
+        const flat = document.createElement("canvas");
+        flat.width = VB_W * rs; flat.height = VB_H * rs;
+        const fctx = flat.getContext("2d");
+        await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => { fctx.drawImage(img, 0, 0, flat.width, flat.height); resolve(); };
+          img.onerror = reject;
+          img.src = svgDataUrl;
+        });
+        const courtImgData = flat.toDataURL("image/png");
+        const courtAspect = flat.height / flat.width;
+
         let hy = 14;
-        if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, compact ? 24 : 34, compact ? 12 : 17);
+        if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, 34, 17);
         doc.setFontSize(9);
         doc.setTextColor(150);
         doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, hy, { align: "right" });
@@ -859,33 +874,42 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           doc.setTextColor(150);
           doc.text(coachName, pageW - marginX, hy + 5, { align: "right" });
         }
-        hy += compact ? 16 : 24;
+        hy += 24;
         doc.setFontSize(8.5);
         doc.setTextColor(5, 150, 105);
-        doc.text((isTenis ? "TENIS" : "PÁDEL") + " · ENTRENO", marginX, hy);
-        hy += compact ? 5 : 7;
+        doc.text("TENIS · ENTRENO", marginX, hy);
+        hy += 7;
         doc.setFont(undefined, "bold");
-        doc.setFontSize(compact ? 15 : 22);
+        doc.setFontSize(22);
         doc.setTextColor(15, 23, 42);
         doc.text((project.name || "Entreno").toUpperCase(), marginX, hy);
         doc.setFont(undefined, "normal");
         doc.setDrawColor(226, 232, 240);
         doc.line(marginX, hy + 4, pageW - marginX, hy + 4);
-        return hy + 10;
+        y = hy + 10;
+
+        const maxCourtH = pageH * 0.48;
+        let courtW = pageW - marginX * 2, courtH = courtW * courtAspect;
+        if (courtH > maxCourtH) { courtH = maxCourtH; courtW = courtH / courtAspect; }
+        doc.addImage(courtImgData, "PNG", (pageW - courtW) / 2, y, courtW, courtH);
+        y += courtH + 10;
+      }
+
+      // Cabecera compacta reutilizada solo si las anotaciones necesitan página(s) adicionales
+      const drawCompactHeader = () => {
+        let hy = 14;
+        if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, 24, 12);
+        doc.setFont(undefined, "bold");
+        doc.setFontSize(15);
+        doc.setTextColor(15, 23, 42);
+        doc.text((project.name || "Entreno").toUpperCase(), marginX + 30, hy + 4);
+        doc.setFont(undefined, "normal");
+        doc.setDrawColor(226, 232, 240);
+        doc.line(marginX, hy + 10, pageW - marginX, hy + 10);
+        return hy + 20;
       };
 
-      let y = drawHeader(false);
-
-      // La pista ocupa como máximo ~48% del alto de página, dejando sitio de sobra para las anotaciones
-      const maxCourtH = pageH * 0.48;
-      let courtW = pageW - marginX * 2;
-      let courtH = courtW * courtAspect;
-      if (courtH > maxCourtH) { courtH = maxCourtH; courtW = courtH / courtAspect; }
-      const courtX = (pageW - courtW) / 2;
-      doc.addImage(courtImgData, "PNG", courtX, y, courtW, courtH);
-      y += courtH + 10;
-
-      // ---- 5. Anotaciones: solo lo que el entrenador ha escrito, paginando si no cabe ----
+      // ---- Anotaciones: solo lo que el entrenador ha escrito, paginando si no cabe ----
       const notes = (project.notes || "").trim();
       if (notes) {
         doc.setFontSize(11.5);
@@ -905,14 +929,14 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           for (const line of lines) {
             if (y > pageH - marginBottom) {
               doc.addPage();
-              y = drawHeader(true);
+              y = drawCompactHeader();
               doc.setFontSize(10.5);
               doc.setTextColor(51, 65, 85);
             }
             doc.text(line, marginX, y);
             y += lineH;
           }
-          y += lineH * 0.4; // pequeño espacio entre párrafos
+          y += lineH * 0.4;
         }
       }
 
