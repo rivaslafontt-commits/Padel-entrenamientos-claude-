@@ -760,7 +760,9 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         // las líneas reales medidas en pdf-template-padel.png (1054x805), para que encajen
         // exactamente con la valla, la red y las líneas de la foto (no solo las 4 esquinas).
         const BL = [318, 272], BR = [737, 263], FR = [886, 637], FL = [157, 637];
-        const NET_L = [263, 397], NET_R = [790, 397];
+        // Base real de la red (donde el cable inferior toca el suelo), no la línea blanca de arriba:
+        // es la que corresponde a la línea central ("red") de la pizarra plana de la app.
+        const NET_L = [240, 450], NET_R = [812, 450];
         const computeHomography = (dst) => {
           const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
           const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
