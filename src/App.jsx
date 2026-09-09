@@ -742,164 +742,126 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const marginX = 14, marginBottom = 16;
       let y;
 
-      if (!isTenis) {
-        // ---- Plantilla fija de pádel: cargar la imagen de fondo (banner + foto de pista) ----
-        const templateImg = await new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = "/pdf-template-padel.png";
-        });
-        const tplAspect = templateImg.height / templateImg.width;
-        const tplW = pageW;
-        const tplH = tplW * tplAspect;
-        doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
+      // ---- Plantilla fotorrealista fija (una por deporte) + esquinas reales medidas sobre ella,
+      // para calibrar la perspectiva. NET_L/NET_R usan la base real de la red (donde el cable
+      // inferior toca el suelo), que es la que corresponde a la línea central ("red") de la
+      // pizarra plana de la app — no la línea blanca de arriba de la red. ----
+      const TEMPLATES = {
+        padel: {
+          src: "/pdf-template-padel.png",
+          corners: { BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637], NET_L: [240, 450], NET_R: [812, 450] },
+        },
+        tenis: {
+          src: "/pdf-template-tenis.png",
+          corners: { BL: [318, 268], BR: [733, 263], FR: [935, 708], FL: [110, 710], NET_L: [223, 470], NET_R: [827, 470] },
+        },
+      };
+      const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
 
-        // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
-        // perspectiva real sobre la foto. Calibrado en 2 tramos (fondo→red, red→frente) usando
-        // las líneas reales medidas en pdf-template-padel.png (1054x805), para que encajen
-        // exactamente con la valla, la red y las líneas de la foto (no solo las 4 esquinas).
-        const BL = [318, 272], BR = [737, 263], FR = [886, 637], FL = [157, 637];
-        // Base real de la red (donde el cable inferior toca el suelo), no la línea blanca de arriba:
-        // es la que corresponde a la línea central ("red") de la pizarra plana de la app.
-        const NET_L = [240, 450], NET_R = [812, 450];
-        const computeHomography = (dst) => {
-          const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
-          const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
-          const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
-          let g, h;
-          if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) { g = 0; h = 0; }
-          else {
-            const den = dx1 * dy2 - dx2 * dy1;
-            g = (dx3 * dy2 - dx2 * dy3) / den;
-            h = (dx1 * dy3 - dx3 * dy1) / den;
-          }
-          const a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, c = x0;
-          const d = y1 - y0 + g * y1, e = y3 - y0 + h * y3, f = y0;
-          return (u, v) => {
-            const denom = g * u + h * v + 1;
-            return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
-          };
+      const templateImg = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = tpl.src;
+      });
+      const tplAspect = templateImg.height / templateImg.width;
+      const tplW = pageW;
+      const tplH = tplW * tplAspect;
+      doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
+
+      // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
+      // perspectiva real sobre la foto, calibrados en 2 tramos (fondo→red, red→frente) ----
+      const { BL, BR, FR, FL, NET_L, NET_R } = tpl.corners;
+      const computeHomography = (dst) => {
+        const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
+        const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+        const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+        let g, h;
+        if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) { g = 0; h = 0; }
+        else {
+          const den = dx1 * dy2 - dx2 * dy1;
+          g = (dx3 * dy2 - dx2 * dy3) / den;
+          h = (dx1 * dy3 - dx3 * dy1) / den;
+        }
+        const a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, c = x0;
+        const d = y1 - y0 + g * y1, e = y3 - y0 + h * y3, f = y0;
+        return (u, v) => {
+          const denom = g * u + h * v + 1;
+          return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
         };
-        const backMap = computeHomography([BL, BR, NET_R, NET_L]);
-        const frontMap = computeHomography([NET_L, NET_R, FR, FL]);
-        const mapPt = (u, v) => (v <= 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
+      };
+      const backMap = computeHomography([BL, BR, NET_R, NET_L]);
+      const frontMap = computeHomography([NET_L, NET_R, FR, FL]);
+      const mapPt = (u, v) => (v <= 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
 
-        const ovCanvas = document.createElement("canvas");
-        ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
-        const octx = ovCanvas.getContext("2d");
+      const ovCanvas = document.createElement("canvas");
+      ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
+      const octx = ovCanvas.getContext("2d");
 
-        // trazos a mano alzada
-        for (const s of project.strokes) {
-          if (!s.points || !s.points.length) continue;
-          octx.beginPath();
-          s.points.forEach((p, i) => {
-            const [px, py] = mapPt(p.x, p.y);
-            i === 0 ? octx.moveTo(px, py) : octx.lineTo(px, py);
-          });
-          octx.strokeStyle = s.color; octx.lineWidth = 5; octx.lineCap = "round"; octx.lineJoin = "round";
-          octx.stroke();
-        }
-        // flechas
-        for (const a of project.arrows) {
-          const [x1, y1] = mapPt(a.x1, a.y1);
-          const [x2, y2] = mapPt(a.x2, a.y2);
-          octx.strokeStyle = a.color; octx.lineWidth = 5.5; octx.lineCap = "round";
-          octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
-          const ang = Math.atan2(y2 - y1, x2 - x1), headLen = 18;
-          octx.beginPath();
-          octx.moveTo(x2, y2);
-          octx.lineTo(x2 - headLen * Math.cos(ang - Math.PI / 6), y2 - headLen * Math.sin(ang - Math.PI / 6));
-          octx.lineTo(x2 - headLen * Math.cos(ang + Math.PI / 6), y2 - headLen * Math.sin(ang + Math.PI / 6));
-          octx.closePath();
-          octx.fillStyle = a.color; octx.fill();
-        }
-        // conos: tamaño mayor cuanto más cerca (v alto) para respetar la perspectiva
-        for (const c of cones) {
-          const [px, py] = mapPt(c.x, c.y);
-          const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
-          octx.beginPath();
-          octx.moveTo(px, py - size);
-          octx.lineTo(px + size * 0.85, py + size * 0.8);
-          octx.lineTo(px - size * 0.85, py + size * 0.8);
-          octx.closePath();
-          octx.fillStyle = c.color; octx.fill();
-        }
-
-        doc.addImage(ovCanvas.toDataURL("image/png"), "PNG", 0, 0, tplW, tplH);
-
-        // Fecha, arriba a la derecha, sobre la plantilla
-        doc.setFontSize(9);
-        doc.setTextColor(90);
-        doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, 14, { align: "right" });
-        if (coachName) {
-          doc.setFontSize(9);
-          doc.setTextColor(140);
-          doc.text(coachName, pageW - marginX, 19, { align: "right" });
-        }
-
-        // Nombre del entreno, en el hueco de la cabecera junto al logo
-        let hy = 20;
-        doc.setFontSize(8.5);
-        doc.setTextColor(5, 150, 105);
-        doc.text("NOMBRE DEL ENTRENAMIENTO", marginX + 58, hy);
-        hy += 8;
-        doc.setFont(undefined, "bold");
-        doc.setFontSize(19);
-        doc.setTextColor(15, 23, 42);
-        doc.text((project.name || "Entreno").toUpperCase(), marginX + 58, hy);
-        doc.setFont(undefined, "normal");
-        doc.setDrawColor(226, 232, 240);
-        doc.line(marginX + 58, hy + 4, pageW - marginX, hy + 4);
-
-        y = tplH + 12;
-      } else {
-        // ---- Tenis: sin plantilla fotorrealista propia todavía, se mantiene el render dinámico de la pizarra ----
-        const svgString = new XMLSerializer().serializeToString(svgRef.current);
-        const svgDataUrl = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString)));
-        const rs = 4;
-        const flat = document.createElement("canvas");
-        flat.width = VB_W * rs; flat.height = VB_H * rs;
-        const fctx = flat.getContext("2d");
-        await new Promise((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => { fctx.drawImage(img, 0, 0, flat.width, flat.height); resolve(); };
-          img.onerror = reject;
-          img.src = svgDataUrl;
+      // trazos a mano alzada
+      for (const s of project.strokes) {
+        if (!s.points || !s.points.length) continue;
+        octx.beginPath();
+        s.points.forEach((p, i) => {
+          const [px, py] = mapPt(p.x, p.y);
+          i === 0 ? octx.moveTo(px, py) : octx.lineTo(px, py);
         });
-        const courtImgData = flat.toDataURL("image/png");
-        const courtAspect = flat.height / flat.width;
-
-        let hy = 14;
-        if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, 34, 17);
-        doc.setFontSize(9);
-        doc.setTextColor(150);
-        doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, hy, { align: "right" });
-        if (coachName) {
-          doc.setFontSize(9);
-          doc.setTextColor(150);
-          doc.text(coachName, pageW - marginX, hy + 5, { align: "right" });
-        }
-        hy += 24;
-        doc.setFontSize(8.5);
-        doc.setTextColor(5, 150, 105);
-        doc.text("TENIS · ENTRENO", marginX, hy);
-        hy += 7;
-        doc.setFont(undefined, "bold");
-        doc.setFontSize(22);
-        doc.setTextColor(15, 23, 42);
-        doc.text((project.name || "Entreno").toUpperCase(), marginX, hy);
-        doc.setFont(undefined, "normal");
-        doc.setDrawColor(226, 232, 240);
-        doc.line(marginX, hy + 4, pageW - marginX, hy + 4);
-        y = hy + 10;
-
-        const maxCourtH = pageH * 0.48;
-        let courtW = pageW - marginX * 2, courtH = courtW * courtAspect;
-        if (courtH > maxCourtH) { courtH = maxCourtH; courtW = courtH / courtAspect; }
-        doc.addImage(courtImgData, "PNG", (pageW - courtW) / 2, y, courtW, courtH);
-        y += courtH + 10;
+        octx.strokeStyle = s.color; octx.lineWidth = 5; octx.lineCap = "round"; octx.lineJoin = "round";
+        octx.stroke();
       }
+      // flechas
+      for (const a of project.arrows) {
+        const [x1, y1] = mapPt(a.x1, a.y1);
+        const [x2, y2] = mapPt(a.x2, a.y2);
+        octx.strokeStyle = a.color; octx.lineWidth = 5.5; octx.lineCap = "round";
+        octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
+        const ang = Math.atan2(y2 - y1, x2 - x1), headLen = 18;
+        octx.beginPath();
+        octx.moveTo(x2, y2);
+        octx.lineTo(x2 - headLen * Math.cos(ang - Math.PI / 6), y2 - headLen * Math.sin(ang - Math.PI / 6));
+        octx.lineTo(x2 - headLen * Math.cos(ang + Math.PI / 6), y2 - headLen * Math.sin(ang + Math.PI / 6));
+        octx.closePath();
+        octx.fillStyle = a.color; octx.fill();
+      }
+      // conos: tamaño mayor cuanto más cerca (v alto) para respetar la perspectiva
+      for (const c of cones) {
+        const [px, py] = mapPt(c.x, c.y);
+        const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
+        octx.beginPath();
+        octx.moveTo(px, py - size);
+        octx.lineTo(px + size * 0.85, py + size * 0.8);
+        octx.lineTo(px - size * 0.85, py + size * 0.8);
+        octx.closePath();
+        octx.fillStyle = c.color; octx.fill();
+      }
+
+      doc.addImage(ovCanvas.toDataURL("image/png"), "PNG", 0, 0, tplW, tplH);
+
+      // Fecha y coach, arriba a la derecha, sobre la plantilla
+      doc.setFontSize(9);
+      doc.setTextColor(90);
+      doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, 14, { align: "right" });
+      if (coachName) {
+        doc.setFontSize(9);
+        doc.setTextColor(140);
+        doc.text(coachName, pageW - marginX, 19, { align: "right" });
+      }
+
+      // Nombre del entreno, en el hueco de la cabecera junto al logo
+      let hy = 20;
+      doc.setFontSize(8.5);
+      doc.setTextColor(5, 150, 105);
+      doc.text("NOMBRE DEL ENTRENAMIENTO", marginX + 58, hy);
+      hy += 8;
+      doc.setFont(undefined, "bold");
+      doc.setFontSize(19);
+      doc.setTextColor(15, 23, 42);
+      doc.text((project.name || "Entreno").toUpperCase(), marginX + 58, hy);
+      doc.setFont(undefined, "normal");
+      doc.setDrawColor(226, 232, 240);
+      doc.line(marginX + 58, hy + 4, pageW - marginX, hy + 4);
+
+      y = tplH + 12;
 
       // Cabecera compacta reutilizada solo si las anotaciones necesitan página(s) adicionales
       const drawCompactHeader = () => {
