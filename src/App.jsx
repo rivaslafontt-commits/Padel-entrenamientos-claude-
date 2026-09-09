@@ -756,9 +756,11 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
 
         // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
-        // perspectiva real sobre la foto, usando las 4 esquinas de la pista de esta plantilla ----
-        // Esquinas medidas sobre pdf-template-padel.png (1054x805): fondo-izq, fondo-der, frente-der, frente-izq
-        const CORNERS = [[298, 268], [735, 265], [925, 635], [115, 638]];
+        // perspectiva real sobre la foto. Calibrado en 2 tramos (fondo→red, red→frente) usando
+        // las líneas reales medidas en pdf-template-padel.png (1054x805), para que encajen
+        // exactamente con la valla, la red y las líneas de la foto (no solo las 4 esquinas).
+        const BL = [318, 272], BR = [737, 263], FR = [886, 637], FL = [157, 637];
+        const NET_L = [263, 397], NET_R = [790, 397];
         const computeHomography = (dst) => {
           const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
           const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -777,7 +779,9 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
             return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
           };
         };
-        const mapPt = computeHomography(CORNERS);
+        const backMap = computeHomography([BL, BR, NET_R, NET_L]);
+        const frontMap = computeHomography([NET_L, NET_R, FR, FL]);
+        const mapPt = (u, v) => (v <= 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
 
         const ovCanvas = document.createElement("canvas");
         ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
