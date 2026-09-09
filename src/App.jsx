@@ -753,7 +753,9 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          corners: { BL: [318, 268], BR: [733, 263], FR: [935, 708], FL: [110, 710], NET_L: [223, 470], NET_R: [827, 470] },
+          // Esquinas en las líneas blancas reales (línea de fondo), ignorando el margen de
+          // pista extra que rodea el campo en la foto (esa zona no existe en la pizarra 2D).
+          corners: { BL: [289, 291], BR: [769, 296], FR: [941, 707], FL: [249, 712], NET_L: [272, 470], NET_R: [842, 470] },
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
