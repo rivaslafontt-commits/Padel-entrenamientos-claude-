@@ -742,20 +742,27 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const marginX = 14, marginBottom = 16;
       let y;
 
-      // ---- Plantilla fotorrealista fija (una por deporte) + esquinas reales medidas sobre ella,
-      // para calibrar la perspectiva. NET_L/NET_R usan la base real de la red (donde el cable
-      // inferior toca el suelo), que es la que corresponde a la línea central ("red") de la
-      // pizarra plana de la app — no la línea blanca de arriba de la red. ----
+      // ---- Plantilla fotorrealista fija (una por deporte) + esquinas reales medidas sobre ella.
+      // Las esquinas BL/BR/FL/FR están puestas EXACTAMENTE sobre las líneas blancas reales de
+      // fondo (ignorando cualquier margen de pista que rodee el campo en la foto, que no existe
+      // en la pizarra 2D). La red se calibra con DOS referencias — NET_TOP (cordón superior) y
+      // NET_BASE (donde toca el suelo) — y se trata como una banda infranqueable: nada de lo que
+      // dibuje el profesor puede caer dentro de esa franja. Todo lo que en la pizarra 2D esté
+      // justo detrás de la red (v<0.5) se queda como mucho en NET_TOP; todo lo que esté justo
+      // delante (v>=0.5) empieza como mínimo en NET_BASE. Las líneas/flechas que cruzan la red
+      // en 2D saltan de un lado a otro de la banda en vez de atravesarla. ----
       const TEMPLATES = {
         padel: {
           src: "/pdf-template-padel.png",
-          corners: { BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637], NET_L: [240, 450], NET_R: [812, 450] },
+          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
+          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
+          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          // Esquinas en las líneas blancas reales (línea de fondo), ignorando el margen de
-          // pista extra que rodea el campo en la foto (esa zona no existe en la pizarra 2D).
-          corners: { BL: [289, 291], BR: [769, 296], FR: [941, 707], FL: [249, 712], NET_L: [272, 470], NET_R: [842, 470] },
+          BL: [289, 291], BR: [769, 296], FR: [941, 707], FL: [249, 712],
+          NET_TOP_L: [277, 418], NET_TOP_R: [820, 418],
+          NET_BASE_L: [272, 470], NET_BASE_R: [842, 470],
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
@@ -772,8 +779,8 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
 
       // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
-      // perspectiva real sobre la foto, calibrados en 2 tramos (fondo→red, red→frente) ----
-      const { BL, BR, FR, FL, NET_L, NET_R } = tpl.corners;
+      // perspectiva real sobre la foto ----
+      const { BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R } = tpl;
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -792,32 +799,49 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
         };
       };
-      const backMap = computeHomography([BL, BR, NET_R, NET_L]);
-      const frontMap = computeHomography([NET_L, NET_R, FR, FL]);
-      const mapPt = (u, v) => (v <= 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
+      // Fondo→cordón superior de la red (nunca pasa de ahí) / base de la red→frente (nunca empieza antes)
+      const backMap = computeHomography([BL, BR, NET_TOP_R, NET_TOP_L]);
+      const frontMap = computeHomography([NET_BASE_L, NET_BASE_R, FR, FL]);
+      const mapPt = (u, v) => (v < 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
+
+      // Para un segmento que cruza v=0.5: la parte trasera llega hasta el cordón superior de la
+      // red, la parte delantera empieza en la base — la línea "salta" la red en vez de atravesarla.
+      const mapSegment = (x1, y1, x2, y2) => {
+        if ((y1 < 0.5) === (y2 < 0.5)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
+        const t = (0.5 - y1) / (y2 - y1);
+        const xCross = x1 + (x2 - x1) * t;
+        const pBack = backMap(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
+        const pFront = frontMap(xCross, 0); // punto de cruce, lado delantero (base)
+        if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
+        return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
+      };
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
       const octx = ovCanvas.getContext("2d");
 
-      // trazos a mano alzada
+      const strokeSegments = (segs, color, width) => {
+        octx.strokeStyle = color; octx.lineWidth = width; octx.lineCap = "round"; octx.lineJoin = "round";
+        for (const [[x1, y1], [x2, y2]] of segs) {
+          octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
+        }
+      };
+
+      // trazos a mano alzada (se parten en cada cruce de la red)
       for (const s of project.strokes) {
-        if (!s.points || !s.points.length) continue;
-        octx.beginPath();
-        s.points.forEach((p, i) => {
-          const [px, py] = mapPt(p.x, p.y);
-          i === 0 ? octx.moveTo(px, py) : octx.lineTo(px, py);
-        });
-        octx.strokeStyle = s.color; octx.lineWidth = 5; octx.lineCap = "round"; octx.lineJoin = "round";
-        octx.stroke();
+        if (!s.points || s.points.length < 2) continue;
+        for (let i = 0; i < s.points.length - 1; i++) {
+          const p1 = s.points[i], p2 = s.points[i + 1];
+          strokeSegments(mapSegment(p1.x, p1.y, p2.x, p2.y), s.color, 5);
+        }
       }
-      // flechas
+      // flechas (la punta siempre se dibuja en su posición real; si cruza la red, el trazo salta)
       for (const a of project.arrows) {
-        const [x1, y1] = mapPt(a.x1, a.y1);
+        const segs = mapSegment(a.x1, a.y1, a.x2, a.y2);
+        strokeSegments(segs, a.color, 5.5);
         const [x2, y2] = mapPt(a.x2, a.y2);
-        octx.strokeStyle = a.color; octx.lineWidth = 5.5; octx.lineCap = "round";
-        octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
-        const ang = Math.atan2(y2 - y1, x2 - x1), headLen = 18;
+        const [px, py] = segs[segs.length - 1][0];
+        const ang = Math.atan2(y2 - py, x2 - px), headLen = 18;
         octx.beginPath();
         octx.moveTo(x2, y2);
         octx.lineTo(x2 - headLen * Math.cos(ang - Math.PI / 6), y2 - headLen * Math.sin(ang - Math.PI / 6));
