@@ -759,11 +759,12 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
         },
         tenis: {
-          src: "/pdf-template-tenis.png",
-          BL: [289, 291], BR: [769, 296], FR: [941, 707], FL: [249, 712],
-          NET_TOP_L: [277, 418], NET_TOP_R: [820, 418],
-          NET_BASE_L: [272, 470], NET_BASE_R: [842, 470],
-        },
+  src: "/pdf-template-tenis.png",
+  BL: [352, 301], BR: [701, 299], FR: [823, 712], FL: [224, 712],
+  NET_TOP_L: [311, 416], NET_TOP_R: [742, 418],
+  NET_BASE_L: [299, 466], NET_BASE_R: [752, 466],
+},
+      
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
 
