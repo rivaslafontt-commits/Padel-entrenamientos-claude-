@@ -813,8 +813,8 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         const xCross = x1 + (x2 - x1) * t;
         const pBack = backMap(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
         const pFront = frontMap(xCross, 0); // punto de cruce, lado delantero (base)
-        if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
-        return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
+       if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pBack, pFront], [pFront, mapPt(x2, y2)]];
+return [[mapPt(x1, y1), pFront], [pFront, pBack], [pBack, mapPt(x2, y2)]];
       };
 
       const ovCanvas = document.createElement("canvas");
