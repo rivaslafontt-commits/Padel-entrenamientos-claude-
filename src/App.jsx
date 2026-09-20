@@ -753,11 +753,11 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       // en 2D saltan de un lado a otro de la banda en vez de atravesarla. ----
       const TEMPLATES = {
         padel: {
-          src: "/pdf-template-padel.png",
-          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
-          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
-          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
-        },
+  src: "/pdf-template-padel.png",
+  BL: [317, 261], BR: [736, 259], FR: [933, 733], FL: [119, 735],
+  NET_TOP_L: [244, 396], NET_TOP_R: [813, 395],
+  NET_BASE_L: [248, 452], NET_BASE_R: [806, 450],
+},
         tenis: {
   src: "/pdf-template-tenis.png",
   BL: [352, 301], BR: [701, 299], FR: [823, 712], FL: [224, 712],
