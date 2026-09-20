@@ -752,17 +752,21 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       // delante (v>=0.5) empieza como mínimo en NET_BASE. Las líneas/flechas que cruzan la red
       // en 2D saltan de un lado a otro de la banda en vez de atravesarla. ----
       const TEMPLATES = {
-        padel: {
+      padel: {
   src: "/pdf-template-padel.png",
-  BL: [317, 261], BR: [736, 259], FR: [933, 733], FL: [119, 735],
-  NET_TOP_L: [244, 396], NET_TOP_R: [813, 395],
-  NET_BASE_L: [248, 452], NET_BASE_R: [806, 450],
+  BL: [318, 259], BR: [736, 259], FR: [934, 735], FL: [118, 737],
+  NET_TOP_L: [243, 393], NET_TOP_R: [810, 393],
+  NET_BASE_L: [250, 449], NET_BASE_R: [801, 448],
+  SERVE_BACK_L: [295, 314], SERVE_BACK_R: [759, 314],
+  SERVE_FRONT_L: [176, 598], SERVE_FRONT_R: [884, 598],
 },
-        tenis: {
+       tenis: {
   src: "/pdf-template-tenis.png",
-  BL: [352, 301], BR: [701, 299], FR: [823, 712], FL: [224, 712],
-  NET_TOP_L: [311, 416], NET_TOP_R: [742, 418],
-  NET_BASE_L: [299, 466], NET_BASE_R: [752, 466],
+  BL: [352, 300], BR: [701, 301], FR: [823, 712], FL: [225, 710],
+  NET_TOP_L: [301, 418], NET_TOP_R: [751, 416],
+  NET_BASE_L: [298, 464], NET_BASE_R: [751, 466],
+  SERVE_BACK_L: [378, 366], SERVE_BACK_R: [673, 365],
+  SERVE_FRONT_L: [328, 580], SERVE_FRONT_R: [721, 582],
 },
       
       };
