@@ -807,16 +807,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       // Para un segmento que cruza v=0.5: la parte trasera llega hasta el cordón superior de la
       // red, la parte delantera empieza en la base — la línea "salta" la red en vez de atravesarla.
-      const mapSegment = (x1, y1, x2, y2) => {
-        if ((y1 < 0.5) === (y2 < 0.5)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
-        const t = (0.5 - y1) / (y2 - y1);
-        const xCross = x1 + (x2 - x1) * t;
-        const pBack = backMap(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
-        const pFront = frontMap(xCross, 0); // punto de cruce, lado delantero (base)
-       if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pBack, pFront], [pFront, mapPt(x2, y2)]];
-return [[mapPt(x1, y1), pFront], [pFront, pBack], [pBack, mapPt(x2, y2)]];
-      };
-
+     const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
       const octx = ovCanvas.getContext("2d");
