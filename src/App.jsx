@@ -877,10 +877,18 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.closePath();
         octx.fillStyle = a.color; octx.fill();
       }
-      // conos: tamaño mayor cuanto más cerca (v alto) para respetar la perspectiva
+      // conos: el ancho real de la pista en esa profundidad (según la calibración) marca el
+      // tamaño, con el mismo CONE_SIZE_RATIO que usa el editor 2D — así el cono guarda la misma
+      // proporción visual en el PDF que en pantalla, cerca o lejos.
+      const localCourtWidthPx = (v) => {
+        const [xL, yL] = mapPt(0, v);
+        const [xR, yR] = mapPt(1, v);
+        return Math.hypot(xR - xL, yR - yL);
+      };
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
-        const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
+        const width = localCourtWidthPx(c.y) * CONE_SIZE_RATIO;
+        const size = width / 1.7; // el triángulo dibujado abajo mide 1.7×size de ancho de base
         octx.beginPath();
         octx.moveTo(px, py - size);
         octx.lineTo(px + size * 0.85, py + size * 0.8);
