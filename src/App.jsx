@@ -752,25 +752,31 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       // delante (v>=0.5) empieza como mínimo en NET_BASE. Las líneas/flechas que cruzan la red
       // en 2D saltan de un lado a otro de la banda en vez de atravesarla. ----
       const TEMPLATES = {
-      padel: {
-  src: "/pdf-template-padel.png",
-  BL: [318, 259], BR: [736, 259], FR: [934, 735], FL: [118, 737],
-  NET_TOP_L: [243, 393], NET_TOP_R: [810, 393],
-  NET_BASE_L: [250, 449], NET_BASE_R: [801, 448],
-  SERVE_BACK_L: [295, 314], SERVE_BACK_R: [759, 314],
-  SERVE_FRONT_L: [176, 598], SERVE_FRONT_R: [884, 598],
-},
-       tenis: {
-  src: "/pdf-template-tenis.png",
-  BL: [352, 300], BR: [701, 301], FR: [823, 712], FL: [225, 710],
-  NET_TOP_L: [301, 418], NET_TOP_R: [751, 416],
-  NET_BASE_L: [298, 464], NET_BASE_R: [751, 466],
-  SERVE_BACK_L: [378, 366], SERVE_BACK_R: [673, 365],
-  SERVE_FRONT_L: [328, 580], SERVE_FRONT_R: [721, 582],
-},
-      
+        padel: {
+          src: "/pdf-template-padel.png",
+          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
+          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
+          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
+          // Línea de servicio (a 3m de la red, sobre 20m de pista total): opcional, mejora la
+          // precisión en el centro de la pista. Si no se calibra, se interpola solo con las
+          // 4 esquinas + red como hasta ahora.
+          SERVE_BACK_L: null, SERVE_BACK_R: null,
+          SERVE_FRONT_L: null, SERVE_FRONT_R: null,
+        },
+        tenis: {
+          src: "/pdf-template-tenis.png",
+          BL: [352, 300], BR: [701, 301], FR: [823, 712], FL: [225, 710],
+          NET_TOP_L: [301, 418], NET_TOP_R: [751, 416],
+          NET_BASE_L: [298, 464], NET_BASE_R: [751, 466],
+          // Línea de servicio (a 6.40m de la red, sobre 23.77m de pista total): opcional.
+          SERVE_BACK_L: [378, 366], SERVE_BACK_R: [673, 365],
+          SERVE_FRONT_L: [328, 580], SERVE_FRONT_R: [721, 582],
+        },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
+      // Fracción real (0=fondo, 1=frente) a la que cae la línea de servicio, calculada sobre la
+      // longitud real de la pista — no es un valor estimado, sale de las medidas oficiales.
+      const SERVE_T = isTenis ? 0.5 - 6.40 / 23.77 : 0.5 - 3 / 20;
 
       const templateImg = await new Promise((resolve, reject) => {
         const img = new Image();
@@ -785,7 +791,10 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
       // perspectiva real sobre la foto ----
-      const { BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R } = tpl;
+      const {
+        BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R,
+        SERVE_BACK_L, SERVE_BACK_R, SERVE_FRONT_L, SERVE_FRONT_R,
+      } = tpl;
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -804,14 +813,37 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
         };
       };
-      // Fondo→cordón superior de la red (nunca pasa de ahí) / base de la red→frente (nunca empieza antes)
-      const backMap = computeHomography([BL, BR, NET_TOP_R, NET_TOP_L]);
-      const frontMap = computeHomography([NET_BASE_L, NET_BASE_R, FR, FL]);
-      const mapPt = (u, v) => (v < 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
+      // ---- Bandas de profundidad: cada tramo entre dos líneas reales conocidas (fondo, línea de
+      // servicio si está calibrada, red, línea de servicio, frente) tiene su propia homografía.
+      // Más bandas = más precisión en el centro de la pista, no solo en los extremos. La red se
+      // trata con dos niveles a la misma profundidad (cordón arriba / base abajo) porque tiene
+      // altura física real y por eso genera un salto visual en la foto. ----
+      const NET_T = 0.5;
+      const LEVELS = [
+        { t: 0, left: BL, right: BR },
+        ...(SERVE_BACK_L ? [{ t: SERVE_T, left: SERVE_BACK_L, right: SERVE_BACK_R }] : []),
+        { t: NET_T, left: NET_TOP_L, right: NET_TOP_R },
+        { t: NET_T, left: NET_BASE_L, right: NET_BASE_R },
+        ...(SERVE_FRONT_L ? [{ t: 1 - SERVE_T, left: SERVE_FRONT_L, right: SERVE_FRONT_R }] : []),
+        { t: 1, left: FL, right: FR },
+      ];
+      const bands = [];
+      for (let i = 0; i < LEVELS.length - 1; i++) {
+        const lo = LEVELS[i], hi = LEVELS[i + 1];
+        if (lo.t === hi.t) continue; // el salto de la red no es una banda interpolable
+        bands.push({ t0: lo.t, t1: hi.t, map: computeHomography([lo.left, lo.right, hi.right, hi.left]) });
+      }
+      const backBands = bands.filter((b) => b.t1 <= NET_T);
+      const frontBands = bands.filter((b) => b.t0 >= NET_T);
+      const mapPt = (u, v) => {
+        const list = v < NET_T ? backBands : frontBands;
+        const band = list.find((b) => v >= b.t0 && v <= b.t1) || list[v < NET_T ? 0 : list.length - 1];
+        const localV = (v - band.t0) / (band.t1 - band.t0);
+        return band.map(u, localV);
+      };
 
-      // Para un segmento que cruza v=0.5: la parte trasera llega hasta el cordón superior de la
-      // red, la parte delantera empieza en la base — la línea "salta" la red en vez de atravesarla.
-     const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
+      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
+
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
       const octx = ovCanvas.getContext("2d");
