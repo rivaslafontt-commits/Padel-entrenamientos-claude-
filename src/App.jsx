@@ -952,22 +952,27 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.closePath();
         octx.fillStyle = a.color; octx.fill();
       }
-      // conos: el ancho real de la pista en esa profundidad (según la calibración) marca el
-      // tamaño, con el mismo CONE_SIZE_RATIO que usa el editor 2D — así el cono guarda la misma
-      // proporción visual en el PDF que en pantalla, cerca o lejos.
+      // ancho real de la pista en cada profundidad (según la calibración) — sirve para que el
+      // tamaño del cono guarde la misma proporción visual en el PDF que en pantalla
       const localCourtWidthPx = (v) => {
         const [xL, yL] = mapPt(0, v);
         const [xR, yR] = mapPt(1, v);
         return Math.hypot(xR - xL, yR - yL);
       };
+      // conos: el punto clicado es la BASE del cono (igual que en el editor 2D — ConeSvg), no el
+      // centro, para que la base caiga exactamente donde se colocó, sin margen
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
         const width = localCourtWidthPx(c.y) * CONE_SIZE_RATIO;
-        const size = width / 1.7; // el triángulo dibujado abajo mide 1.7×size de ancho de base
+        const halfBase = width * 0.5;
+        const topY = py - width * 0.95;
         octx.beginPath();
-        octx.moveTo(px, py - size);
-        octx.lineTo(px + size * 0.85, py + size * 0.8);
-        octx.lineTo(px - size * 0.85, py + size * 0.8);
+        octx.ellipse(px, py, halfBase, halfBase * 0.38, 0, 0, Math.PI * 2);
+        octx.fillStyle = c.color; octx.globalAlpha = 0.9; octx.fill(); octx.globalAlpha = 1;
+        octx.beginPath();
+        octx.moveTo(px - halfBase * 0.78, py);
+        octx.lineTo(px + halfBase * 0.78, py);
+        octx.lineTo(px, topY);
         octx.closePath();
         octx.fillStyle = c.color; octx.fill();
       }
