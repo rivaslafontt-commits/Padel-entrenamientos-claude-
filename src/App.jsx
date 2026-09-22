@@ -862,7 +862,10 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       // de un tirón fondo-a-frente — así el centro de la pista queda tan preciso como los
       // extremos. Solo se corrige la franja entre las dos líneas de individuales; el resto de
       // la pista no se toca. ----
-      const SINGLES_U = 1.37 / 10.97;
+      // Debe coincidir EXACTO con la fracción que guarda el editor 2D al hacer clic sobre su
+      // línea de individuales (TennisCourtLines: pad=2 sobre VB_W=300) — no con la proporción
+      // real pura, porque el editor deja un margen de 2px que desplaza ligeramente esa fracción.
+      const SINGLES_U = (2 + (300 - 4) * (1.37 / 10.97)) / 300;
       let mapPt = mapPtRaw;
       if (isTenis && tpl.SINGLES_BACK_L && tpl.SINGLES_FRONT_L) {
         const diff = (real, calc) => [real[0] - calc[0], real[1] - calc[1]];
