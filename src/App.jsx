@@ -764,17 +764,25 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          BL: [351, 300], BR: [701, 300], FR: [824, 711], FL: [225, 712],
-          NET_TOP_L: [306, 419], NET_TOP_R: [741, 419],
-          NET_BASE_L: [297, 466], NET_BASE_R: [751, 467],
+          BL: [351, 300], BR: [699, 300], FR: [825, 712], FL: [224, 711],
+          NET_TOP_L: [308, 417], NET_TOP_R: [744, 417],
+          NET_BASE_L: [300, 466], NET_BASE_R: [752, 464],
           // Línea de servicio (a 6.40m de la red, sobre 23.77m de pista total): opcional.
-          SERVE_BACK_L: [376, 366], SERVE_BACK_R: [672, 366],
-          SERVE_FRONT_L: [328, 582], SERVE_FRONT_R: [722, 582],
+          SERVE_BACK_L: [378, 366], SERVE_BACK_R: [674, 367],
+          SERVE_FRONT_L: [329, 582], SERVE_FRONT_R: [721, 581],
           // Líneas de individuales (a 1.37m de cada lateral de dobles, sobre 10.97m de ancho):
           // opcional. Sin esto, esa línea interior se calcula por interpolación matemática y
-          // puede desviarse un poco por la distorsión propia del render de la foto.
-          SINGLES_BACK_L: [392, 300], SINGLES_BACK_R: [660, 301],
-          SINGLES_FRONT_L: [296, 711], SINGLES_FRONT_R: [752, 711],
+          // puede desviarse un poco por la distorsión propia del render de la foto. Cuantas más
+          // de estas se calibren (fondo/frente son suficientes, el resto afina más el centro),
+          // más precisa queda en toda la pista, no solo en los extremos.
+          SINGLES_BACK_L: [393, 299], SINGLES_BACK_R: [660, 300],
+          SINGLES_FRONT_L: [299, 711], SINGLES_FRONT_R: [751, 711],
+          // Pendiente de recalibrar: estos 4 puntos se marcaron sobre la línea de dobles en vez
+          // de la de individuales (ver conversación) — no usar hasta corregir.
+          SINGLES_SERVE_BACK_L: null, SINGLES_SERVE_BACK_R: null,
+          SINGLES_NET_TOP_L: [362, 421], SINGLES_NET_TOP_R: [688, 421],
+          SINGLES_NET_BASE_L: [354, 465], SINGLES_NET_BASE_R: [699, 466],
+          SINGLES_SERVE_FRONT_L: null, SINGLES_SERVE_FRONT_R: null,
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
@@ -848,31 +856,64 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       // ---- Corrección de las líneas de individuales (tenis): son líneas interiores, no el
       // borde de la pista, así que la homografía las sitúa por cálculo puro y puede desviarse
-      // por la distorsión propia del render de la foto. Si están calibradas (fondo y frente),
-      // se mide la diferencia real vs. la calculada en esos dos puntos y se aplica esa misma
-      // corrección, interpolada en profundidad, a toda la franja entre las dos líneas de
-      // individuales — el resto de la pista (fuera de esa franja) no se toca. ----
+      // por la distorsión propia del render de la foto. Si hay puntos calibrados en alguna fila
+      // (fondo, saque, red, frente), se mide ahí la diferencia real vs. la calculada y esa
+      // corrección se interpola POR TRAMOS (igual que las bandas de profundidad de arriba), no
+      // de un tirón fondo-a-frente — así el centro de la pista queda tan preciso como los
+      // extremos. Solo se corrige la franja entre las dos líneas de individuales; el resto de
+      // la pista no se toca. ----
       const SINGLES_U = 1.37 / 10.97;
       let mapPt = mapPtRaw;
       if (isTenis && tpl.SINGLES_BACK_L && tpl.SINGLES_FRONT_L) {
         const diff = (real, calc) => [real[0] - calc[0], real[1] - calc[1]];
-        const corrBackL = diff(tpl.SINGLES_BACK_L, mapPtRaw(SINGLES_U, 0));
-        const corrBackR = diff(tpl.SINGLES_BACK_R, mapPtRaw(1 - SINGLES_U, 0));
-        const corrFrontL = diff(tpl.SINGLES_FRONT_L, mapPtRaw(SINGLES_U, 1));
-        const corrFrontR = diff(tpl.SINGLES_FRONT_R, mapPtRaw(1 - SINGLES_U, 1));
+        // mismas filas que LEVELS, con el punto de individuales real si está calibrado en esa fila
+        const SINGLES_LEVELS = [
+          { t: 0, L: tpl.SINGLES_BACK_L, R: tpl.SINGLES_BACK_R },
+          ...(tpl.SINGLES_SERVE_BACK_L ? [{ t: SERVE_T, L: tpl.SINGLES_SERVE_BACK_L, R: tpl.SINGLES_SERVE_BACK_R }] : []),
+          ...(tpl.SINGLES_NET_TOP_L ? [{ t: NET_T, L: tpl.SINGLES_NET_TOP_L, R: tpl.SINGLES_NET_TOP_R }] : []),
+          ...(tpl.SINGLES_NET_BASE_L ? [{ t: NET_T, L: tpl.SINGLES_NET_BASE_L, R: tpl.SINGLES_NET_BASE_R }] : []),
+          ...(tpl.SINGLES_SERVE_FRONT_L ? [{ t: 1 - SERVE_T, L: tpl.SINGLES_SERVE_FRONT_L, R: tpl.SINGLES_SERVE_FRONT_R }] : []),
+          { t: 1, L: tpl.SINGLES_FRONT_L, R: tpl.SINGLES_FRONT_R },
+        ];
+        // corrección (diferencia real vs. calculada) en cada una de esas filas. En la red, hay
+        // dos filas con la misma profundidad (cordón/arriba y base/abajo) — para que cada una
+        // consulte su propio lado (mapPtRaw decide trasero/delantero justo en v=NET_T), se
+        // desplaza un pelín hacia el lado que le toca antes de calcular la referencia.
+        const corr = SINGLES_LEVELS.map((lvl, i) => {
+          let vRef = lvl.t;
+          if (lvl.t === NET_T) {
+            const isTopRow = SINGLES_LEVELS[i + 1] && SINGLES_LEVELS[i + 1].t === NET_T;
+            vRef = isTopRow ? NET_T - 1e-6 : NET_T + 1e-6;
+          }
+          return { t: lvl.t, cL: diff(lvl.L, mapPtRaw(SINGLES_U, vRef)), cR: diff(lvl.R, mapPtRaw(1 - SINGLES_U, vRef)) };
+        });
+        // tramos entre filas consecutivas (salta el tramo de altura de la red, igual que arriba)
+        const corrBands = [];
+        for (let i = 0; i < corr.length - 1; i++) {
+          const lo = corr[i], hi = corr[i + 1];
+          if (lo.t === hi.t) continue;
+          corrBands.push({ t0: lo.t, t1: hi.t, cL0: lo.cL, cR0: lo.cR, cL1: hi.cL, cR1: hi.cR });
+        }
         const weightFor = (u) => {
           if (u <= 0 || u >= 1) return 0;
           if (u < SINGLES_U) return u / SINGLES_U;
           if (u > 1 - SINGLES_U) return (1 - u) / SINGLES_U;
           return 1;
         };
+        const correctionAt = (v) => {
+          const band = corrBands.find((b) => v >= b.t0 && v <= b.t1) || corrBands[v < NET_T ? 0 : corrBands.length - 1];
+          const lv = (v - band.t0) / (band.t1 - band.t0);
+          const cL = [band.cL0[0] * (1 - lv) + band.cL1[0] * lv, band.cL0[1] * (1 - lv) + band.cL1[1] * lv];
+          const cR = [band.cR0[0] * (1 - lv) + band.cR1[0] * lv, band.cR0[1] * (1 - lv) + band.cR1[1] * lv];
+          return { cL, cR };
+        };
         mapPt = (u, v) => {
           const [x, y] = mapPtRaw(u, v);
           const w = weightFor(u);
           if (w === 0) return [x, y];
-          const [cbx, cby] = u > 0.5 ? corrBackR : corrBackL;
-          const [cfx, cfy] = u > 0.5 ? corrFrontR : corrFrontL;
-          return [x + (cbx * (1 - v) + cfx * v) * w, y + (cby * (1 - v) + cfy * v) * w];
+          const { cL, cR } = correctionAt(v);
+          const [cx, cy] = u > 0.5 ? cR : cL;
+          return [x + cx * w, y + cy * w];
         };
       }
 
