@@ -607,8 +607,8 @@ function PadelCourtLines({ w, h }) {
   const stroke = "#0f766e";
   const strokeWidth = 2;
   const netY = h * 0.5;
-  const serviceTop = h * (0.5 - 6.95 / 20);
-  const serviceBottom = h * (0.5 + 6.95 / 20);
+  const serviceTop = h * 0.18;
+  const serviceBottom = h * 0.82;
   const midX = w * 0.5;
   return (
     <g>
@@ -754,41 +754,22 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const TEMPLATES = {
         padel: {
           src: "/pdf-template-padel.png",
-          BL: [318, 260], BR: [737, 259], FR: [935, 733], FL: [120, 734],
-          NET_TOP_L: [247, 394], NET_TOP_R: [808, 395],
-          NET_BASE_L: [248, 450], NET_BASE_R: [805, 450],
-          // Línea de servicio: reglamento FIP, 6.95m de la red (NO 3m — error corregido).
-          // Sobre 20m de pista total, queda muy cerca del fondo, no del centro.
-          SERVE_BACK_L: [300, 293], SERVE_BACK_R: [754, 293],
-          SERVE_FRONT_L: [170, 623], SERVE_FRONT_R: [884, 622],
+          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
+          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
+          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          BL: [351, 300], BR: [699, 300], FR: [825, 712], FL: [224, 711],
-          NET_TOP_L: [308, 417], NET_TOP_R: [744, 417],
-          NET_BASE_L: [300, 466], NET_BASE_R: [752, 464],
-          // Línea de servicio (a 6.40m de la red, sobre 23.77m de pista total): opcional.
-          SERVE_BACK_L: [378, 366], SERVE_BACK_R: [674, 367],
-          SERVE_FRONT_L: [329, 582], SERVE_FRONT_R: [721, 581],
-          // Líneas de individuales (a 1.37m de cada lateral de dobles, sobre 10.97m de ancho):
-          // opcional. Sin esto, esa línea interior se calcula por interpolación matemática y
-          // puede desviarse un poco por la distorsión propia del render de la foto. Cuantas más
-          // de estas se calibren (fondo/frente son suficientes, el resto afina más el centro),
-          // más precisa queda en toda la pista, no solo en los extremos.
-          SINGLES_BACK_L: [393, 299], SINGLES_BACK_R: [660, 300],
-          SINGLES_FRONT_L: [299, 711], SINGLES_FRONT_R: [751, 711],
-          // Pendiente de recalibrar: estos 4 puntos se marcaron sobre la línea de dobles en vez
-          // de la de individuales (ver conversación) — no usar hasta corregir.
-          SINGLES_SERVE_BACK_L: null, SINGLES_SERVE_BACK_R: null,
-          SINGLES_NET_TOP_L: [362, 421], SINGLES_NET_TOP_R: [688, 421],
-          SINGLES_NET_BASE_L: [354, 465], SINGLES_NET_BASE_R: [699, 466],
-          SINGLES_SERVE_FRONT_L: null, SINGLES_SERVE_FRONT_R: null,
+          // single: true => una sola homografía para toda la pista (las flechas cruzan la red
+          // sin partirse y siguen siendo rectas). BL/BR/FR/FL son las esquinas "equivalentes"
+          // que mejor encajan con TODAS las líneas blancas de la foto a la vez (error máx. ~6 px).
+          single: true,
+          BL: [345.9, 302.4], BR: [705.6, 302.4], FR: [822.4, 717.4], FL: [226.3, 717.3],
+          NET_TOP_L: [314, 418], NET_TOP_R: [736, 418],
+          NET_BASE_L: [300, 466], NET_BASE_R: [751, 466],
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
-      // Fracción real (0=fondo, 1=frente) a la que cae la línea de servicio, calculada sobre la
-      // longitud real de la pista — no es un valor estimado, sale de las medidas oficiales.
-      const SERVE_T = isTenis ? 0.5 - 6.40 / 23.77 : 0.5 - 6.95 / 20;
 
       const templateImg = await new Promise((resolve, reject) => {
         const img = new Image();
@@ -803,10 +784,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
       // perspectiva real sobre la foto ----
-      const {
-        BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R,
-        SERVE_BACK_L, SERVE_BACK_R, SERVE_FRONT_L, SERVE_FRONT_R,
-      } = tpl;
+      const { BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R } = tpl;
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -825,102 +803,28 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
         };
       };
-      // ---- Bandas de profundidad: cada tramo entre dos líneas reales conocidas (fondo, línea de
-      // servicio si está calibrada, red, línea de servicio, frente) tiene su propia homografía.
-      // Más bandas = más precisión en el centro de la pista, no solo en los extremos. La red se
-      // trata con dos niveles a la misma profundidad (cordón arriba / base abajo) porque tiene
-      // altura física real y por eso genera un salto visual en la foto. ----
-      const NET_T = 0.5;
-      const LEVELS = [
-        { t: 0, left: BL, right: BR },
-        ...(SERVE_BACK_L ? [{ t: SERVE_T, left: SERVE_BACK_L, right: SERVE_BACK_R }] : []),
-        { t: NET_T, left: NET_TOP_L, right: NET_TOP_R },
-        { t: NET_T, left: NET_BASE_L, right: NET_BASE_R },
-        ...(SERVE_FRONT_L ? [{ t: 1 - SERVE_T, left: SERVE_FRONT_L, right: SERVE_FRONT_R }] : []),
-        { t: 1, left: FL, right: FR },
-      ];
-      const bands = [];
-      for (let i = 0; i < LEVELS.length - 1; i++) {
-        const lo = LEVELS[i], hi = LEVELS[i + 1];
-        if (lo.t === hi.t) continue; // el salto de la red no es una banda interpolable
-        bands.push({ t0: lo.t, t1: hi.t, map: computeHomography([lo.left, lo.right, hi.right, hi.left]) });
-      }
-      const backBands = bands.filter((b) => b.t1 <= NET_T);
-      const frontBands = bands.filter((b) => b.t0 >= NET_T);
-      const mapPtRaw = (u, v) => {
-        const list = v < NET_T ? backBands : frontBands;
-        const band = list.find((b) => v >= b.t0 && v <= b.t1) || list[v < NET_T ? 0 : list.length - 1];
-        const localV = (v - band.t0) / (band.t1 - band.t0);
-        return band.map(u, localV);
+      // Fondo→cordón superior de la red (nunca pasa de ahí) / base de la red→frente (nunca empieza antes)
+      const backMap = computeHomography([BL, BR, NET_TOP_R, NET_TOP_L]);
+      const frontMap = computeHomography([NET_BASE_L, NET_BASE_R, FR, FL]);
+      // Tenis: una sola homografía para toda la pista (líneas continuas y rectas también al
+      // cruzar la red). Pádel: dos mitades con banda de red infranqueable.
+      const singleMap = tpl.single ? computeHomography([BL, BR, FR, FL]) : null;
+      const mapPt = (u, v) => singleMap
+        ? singleMap(u, v)
+        : (v < 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
+
+      // Para un segmento que cruza v=0.5: la parte trasera llega hasta el cordón superior de la
+      // red, la parte delantera empieza en la base — la línea "salta" la red en vez de atravesarla.
+      const mapSegment = (x1, y1, x2, y2) => {
+        if (singleMap) return [[mapPt(x1, y1), mapPt(x2, y2)]];
+        if ((y1 < 0.5) === (y2 < 0.5)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
+        const t = (0.5 - y1) / (y2 - y1);
+        const xCross = x1 + (x2 - x1) * t;
+        const pBack = backMap(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
+        const pFront = frontMap(xCross, 0); // punto de cruce, lado delantero (base)
+        if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
+        return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
       };
-
-      // ---- Corrección de las líneas de individuales (tenis): son líneas interiores, no el
-      // borde de la pista, así que la homografía las sitúa por cálculo puro y puede desviarse
-      // por la distorsión propia del render de la foto. Si hay puntos calibrados en alguna fila
-      // (fondo, saque, red, frente), se mide ahí la diferencia real vs. la calculada y esa
-      // corrección se interpola POR TRAMOS (igual que las bandas de profundidad de arriba), no
-      // de un tirón fondo-a-frente — así el centro de la pista queda tan preciso como los
-      // extremos. Solo se corrige la franja entre las dos líneas de individuales; el resto de
-      // la pista no se toca. ----
-      // Debe coincidir EXACTO con la fracción que guarda el editor 2D al hacer clic sobre su
-      // línea de individuales (TennisCourtLines: pad=2 sobre VB_W=300) — no con la proporción
-      // real pura, porque el editor deja un margen de 2px que desplaza ligeramente esa fracción.
-      const SINGLES_U = (2 + (300 - 4) * (1.37 / 10.97)) / 300;
-      let mapPt = mapPtRaw;
-      if (isTenis && tpl.SINGLES_BACK_L && tpl.SINGLES_FRONT_L) {
-        const diff = (real, calc) => [real[0] - calc[0], real[1] - calc[1]];
-        // mismas filas que LEVELS, con el punto de individuales real si está calibrado en esa fila
-        const SINGLES_LEVELS = [
-          { t: 0, L: tpl.SINGLES_BACK_L, R: tpl.SINGLES_BACK_R },
-          ...(tpl.SINGLES_SERVE_BACK_L ? [{ t: SERVE_T, L: tpl.SINGLES_SERVE_BACK_L, R: tpl.SINGLES_SERVE_BACK_R }] : []),
-          ...(tpl.SINGLES_NET_TOP_L ? [{ t: NET_T, L: tpl.SINGLES_NET_TOP_L, R: tpl.SINGLES_NET_TOP_R }] : []),
-          ...(tpl.SINGLES_NET_BASE_L ? [{ t: NET_T, L: tpl.SINGLES_NET_BASE_L, R: tpl.SINGLES_NET_BASE_R }] : []),
-          ...(tpl.SINGLES_SERVE_FRONT_L ? [{ t: 1 - SERVE_T, L: tpl.SINGLES_SERVE_FRONT_L, R: tpl.SINGLES_SERVE_FRONT_R }] : []),
-          { t: 1, L: tpl.SINGLES_FRONT_L, R: tpl.SINGLES_FRONT_R },
-        ];
-        // corrección (diferencia real vs. calculada) en cada una de esas filas. En la red, hay
-        // dos filas con la misma profundidad (cordón/arriba y base/abajo) — para que cada una
-        // consulte su propio lado (mapPtRaw decide trasero/delantero justo en v=NET_T), se
-        // desplaza un pelín hacia el lado que le toca antes de calcular la referencia.
-        const corr = SINGLES_LEVELS.map((lvl, i) => {
-          let vRef = lvl.t;
-          if (lvl.t === NET_T) {
-            const isTopRow = SINGLES_LEVELS[i + 1] && SINGLES_LEVELS[i + 1].t === NET_T;
-            vRef = isTopRow ? NET_T - 1e-6 : NET_T + 1e-6;
-          }
-          return { t: lvl.t, cL: diff(lvl.L, mapPtRaw(SINGLES_U, vRef)), cR: diff(lvl.R, mapPtRaw(1 - SINGLES_U, vRef)) };
-        });
-        // tramos entre filas consecutivas (salta el tramo de altura de la red, igual que arriba)
-        const corrBands = [];
-        for (let i = 0; i < corr.length - 1; i++) {
-          const lo = corr[i], hi = corr[i + 1];
-          if (lo.t === hi.t) continue;
-          corrBands.push({ t0: lo.t, t1: hi.t, cL0: lo.cL, cR0: lo.cR, cL1: hi.cL, cR1: hi.cR });
-        }
-        const weightFor = (u) => {
-          if (u <= 0 || u >= 1) return 0;
-          if (u < SINGLES_U) return u / SINGLES_U;
-          if (u > 1 - SINGLES_U) return (1 - u) / SINGLES_U;
-          return 1;
-        };
-        const correctionAt = (v) => {
-          const band = corrBands.find((b) => v >= b.t0 && v <= b.t1) || corrBands[v < NET_T ? 0 : corrBands.length - 1];
-          const lv = (v - band.t0) / (band.t1 - band.t0);
-          const cL = [band.cL0[0] * (1 - lv) + band.cL1[0] * lv, band.cL0[1] * (1 - lv) + band.cL1[1] * lv];
-          const cR = [band.cR0[0] * (1 - lv) + band.cR1[0] * lv, band.cR0[1] * (1 - lv) + band.cR1[1] * lv];
-          return { cL, cR };
-        };
-        mapPt = (u, v) => {
-          const [x, y] = mapPtRaw(u, v);
-          const w = weightFor(u);
-          if (w === 0) return [x, y];
-          const { cL, cR } = correctionAt(v);
-          const [cx, cy] = u > 0.5 ? cR : cL;
-          return [x + cx * w, y + cy * w];
-        };
-      }
-
-      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
@@ -933,7 +837,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         }
       };
 
-      // trazos a mano alzada (siempre en línea recta, también al cruzar la red)
+      // trazos a mano alzada (se parten en cada cruce de la red)
       for (const s of project.strokes) {
         if (!s.points || s.points.length < 2) continue;
         for (let i = 0; i < s.points.length - 1; i++) {
@@ -941,7 +845,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           strokeSegments(mapSegment(p1.x, p1.y, p2.x, p2.y), s.color, 5);
         }
       }
-      // flechas (siempre en línea recta, también al cruzar la red; la punta va en su posición real)
+      // flechas (la punta siempre se dibuja en su posición real; si cruza la red, el trazo salta)
       for (const a of project.arrows) {
         const segs = mapSegment(a.x1, a.y1, a.x2, a.y2);
         strokeSegments(segs, a.color, 5.5);
@@ -955,27 +859,14 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.closePath();
         octx.fillStyle = a.color; octx.fill();
       }
-      // ancho real de la pista en cada profundidad (según la calibración) — sirve para que el
-      // tamaño del cono guarde la misma proporción visual en el PDF que en pantalla
-      const localCourtWidthPx = (v) => {
-        const [xL, yL] = mapPt(0, v);
-        const [xR, yR] = mapPt(1, v);
-        return Math.hypot(xR - xL, yR - yL);
-      };
-      // conos: el punto clicado es la BASE del cono (igual que en el editor 2D — ConeSvg), no el
-      // centro, para que la base caiga exactamente donde se colocó, sin margen
+      // conos: tamaño mayor cuanto más cerca (v alto) para respetar la perspectiva
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
-        const width = localCourtWidthPx(c.y) * CONE_SIZE_RATIO;
-        const halfBase = width * 0.5;
-        const topY = py - width * 0.95;
+        const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
         octx.beginPath();
-        octx.ellipse(px, py, halfBase, halfBase * 0.38, 0, 0, Math.PI * 2);
-        octx.fillStyle = c.color; octx.globalAlpha = 0.9; octx.fill(); octx.globalAlpha = 1;
-        octx.beginPath();
-        octx.moveTo(px - halfBase * 0.78, py);
-        octx.lineTo(px + halfBase * 0.78, py);
-        octx.lineTo(px, topY);
+        octx.moveTo(px, py - size);
+        octx.lineTo(px + size * 0.85, py + size * 0.8);
+        octx.lineTo(px - size * 0.85, py + size * 0.8);
         octx.closePath();
         octx.fillStyle = c.color; octx.fill();
       }
