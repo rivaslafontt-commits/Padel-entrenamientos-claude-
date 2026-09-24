@@ -859,14 +859,26 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.closePath();
         octx.fillStyle = a.color; octx.fill();
       }
-      // conos: tamaño mayor cuanto más cerca (v alto) para respetar la perspectiva
+      // conos. Tenis: mismo tamaño relativo que en la pizarra 2D (CONE_SIZE_RATIO del ancho de
+      // la pista), escalado por la perspectiva (más pequeño al fondo, más grande cerca) y con la
+      // base apoyada en el punto marcado. CONE_PDF_SCALE los agranda/reduce (1 = idéntico a 2D; 1.6 = algo mayor para que se lean en el A4).
+      // Pádel: se mantiene el tamaño de siempre.
+      const CONE_PDF_SCALE = 1.6;
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
-        const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
         octx.beginPath();
-        octx.moveTo(px, py - size);
-        octx.lineTo(px + size * 0.85, py + size * 0.8);
-        octx.lineTo(px - size * 0.85, py + size * 0.8);
+        if (singleMap) {
+          const courtWidthPx = Math.abs(mapPt(1, c.y)[0] - mapPt(0, c.y)[0]);
+          const size = courtWidthPx * CONE_SIZE_RATIO * CONE_PDF_SCALE;
+          octx.moveTo(px, py - size * 0.95);
+          octx.lineTo(px + size * 0.39, py);
+          octx.lineTo(px - size * 0.39, py);
+        } else {
+          const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
+          octx.moveTo(px, py - size);
+          octx.lineTo(px + size * 0.85, py + size * 0.8);
+          octx.lineTo(px - size * 0.85, py + size * 0.8);
+        }
         octx.closePath();
         octx.fillStyle = c.color; octx.fill();
       }
