@@ -151,7 +151,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      // 1. ¿Venimos de hacer clic en el enlace del email? Supabase pone el token en el fragmento de la URL.
+      // 1. ¿Venimos de hacer clic en el enlace del email?
       try {
         const hash = window.location.hash;
         if (hash && hash.includes("access_token")) {
@@ -165,7 +165,6 @@ export default function App() {
             if (u && !u.error) {
               setUser(u);
               setAuthState("signedIn");
-              // limpiar la URL para no dejar el token visible
               window.history.replaceState(null, "", window.location.pathname);
               return;
             }
@@ -484,7 +483,7 @@ function UpgradeModal({ reason, onCancel }) {
             Ahora no
           </button>
           <button
-            onClick={() => { /* TODO: aquí conectaremos el checkout de Stripe en el siguiente paso */ onCancel(); }}
+            onClick={() => { onCancel(); }}
             className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium py-2.5 rounded-lg"
           >
             Hazte premium
@@ -673,9 +672,6 @@ function ArrowSvg({ x1, y1, x2, y2, color, strokeWidth = 3, headSize = 10, selec
   );
 }
 
-// Un cono de entrenamiento real mide ~20cm de base. Una pista de pádel mide 10m de largo.
-// 0.2 / 10 = 2% del largo de la pista. Lo usamos como referencia de tamaño (proporción
-// del lado más largo del campo de juego, VB_H), igual para pádel y tenis.
 const CONE_SIZE_RATIO = 0.033;
 
 function ConeSvg({ x, y, color, size = 10, selected }) {
@@ -684,14 +680,11 @@ function ConeSvg({ x, y, color, size = 10, selected }) {
   return (
     <g>
       {selected && <circle cx={x} cy={y} r={size * 0.9} fill="#3b82f6" opacity={0.25} />}
-      {/* sombra/base elíptica */}
       <ellipse cx={x} cy={y} rx={halfBase} ry={halfBase * 0.38} fill={color} opacity={0.9} />
-      {/* cuerpo del cono */}
       <polygon
         points={`${x - halfBase * 0.78},${y} ${x + halfBase * 0.78},${y} ${x},${topY}`}
         fill={color}
       />
-      {/* franja clara, como los conos reales */}
       <polygon
         points={`${x - halfBase * 0.45},${y - size * 0.32} ${x + halfBase * 0.45},${y - size * 0.32} ${x + halfBase * 0.27},${y - size * 0.5} ${x - halfBase * 0.27},${y - size * 0.5}`}
         fill="white" opacity={0.85}
@@ -714,10 +707,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
   const isTenis = project.sport === "tenis";
   const cones = project.cones || [];
 
-  // Genera el PDF ("informe de entreno"). En pádel usa la plantilla fotorrealista fija
-  // (misma imagen de fondo siempre) y solo escribe encima el texto real: nombre del
-  // entreno, fecha, coach y anotaciones. En tenis (sin plantilla propia todavía) usa
-  // el render dinámico de la pizarra real. Solo disponible en plan premium.
   const exportPdf = async () => {
     if (plan !== "premium") { onExportBlocked(); return; }
     setExporting(true);
@@ -742,24 +731,10 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const marginX = 14, marginBottom = 16;
       let y;
 
-      // ---- Plantilla fotorrealista fija (una por deporte) + puntos reales medidos sobre ella.
-      // La pista se divide en VARIAS ZONAS horizontales (no solo fondo/red/frente), cada una con
-      // su propia homografía. Esto es necesario porque una única transformación de perspectiva
-      // para toda la mitad trasera o toda la delantera no reproduce bien los puntos intermedios
-      // (como la línea de servicio): el error se concentra justo ahí, en medio de cada mitad.
-      // Por eso en pádel añadimos la línea de servicio de cada lado como frontera extra —igual
-      // que ya se hacía con NET_TOP/NET_BASE— y la pista queda en 4 zonas en vez de 2.
-      // La red se sigue calibrando con DOS referencias — NET_TOP (cordón superior) y NET_BASE
-      // (donde toca el suelo) — y se sigue tratando como una banda infranqueable: nada de lo que
-      // dibuje el profesor puede caer dentro de esa franja. Todo lo que en la pizarra 2D esté
-      // justo detrás de la red (v<0.5) se queda como mucho en NET_TOP; todo lo que esté justo
-      // delante (v>=0.5) empieza como mínimo en NET_BASE. Las líneas/flechas que cruzan la red
-      // en 2D saltan de un lado a otro de la banda en vez de atravesarla. ----
       const TEMPLATES = {
         padel: {
           src: "/pdf-template-padel.png",
           netV: 0.5,
-          // v=0 fondo … v=1 frente. Cada zona: fila izq/dcha al empezar (L0/R0) y al terminar (L1/R1).
           zones: [
             { vFrom: 0,    vTo: 0.18, L0: [319, 260], R0: [736, 260], L1: [303, 295], R1: [754, 290] },
             { vFrom: 0.18, vTo: 0.5,  L0: [303, 295], R0: [754, 290], L1: [244, 396], R1: [809, 396] },
@@ -789,8 +764,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const tplH = tplW * tplAspect;
       doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
 
-      // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
-      // perspectiva real sobre la foto ----
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -810,37 +783,21 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         };
       };
 
-      // Una homografía independiente por zona: cada una es exacta en sus dos extremos, así que
-      // con 4 zonas en vez de 2 el punto intermedio de cada una (p.ej. la línea de servicio) cae
-      // justo donde toca en la foto, en vez de arrastrar el error de un tramo mucho más largo.
       const zones = tpl.zones.map(z => ({ ...z, map: computeHomography([z.L0, z.R0, z.R1, z.L1]) }));
       const zoneFor = (v) => zones.find(z => v < z.vTo) || zones[zones.length - 1];
       const mapPt = (u, v) => {
         const z = zoneFor(v);
         return z.map(u, (v - z.vFrom) / (z.vTo - z.vFrom));
       };
-      // Ancho real (en píxeles de la foto) de la pista a una profundidad v — se usa para escalar
-      // los conos con la misma perspectiva con la que se ve la propia pista en cada zona.
+
       const courtWidthAt = (v) => {
         const [xL, yL] = mapPt(0, v);
         const [xR, yR] = mapPt(1, v);
         return Math.hypot(xR - xL, yR - yL);
       };
 
-      // La red sigue siendo infranqueable exactamente igual que antes: un segmento que la cruza
-      // "salta" de la zona que toca el cordón superior por detrás a la que toca la base por
-      // delante, en vez de atravesarla en línea recta.
-      const netBackZone = zones.find(z => z.vTo === tpl.netV);
-      const netFrontZone = zones.find(z => z.vFrom === tpl.netV);
-      const mapSegment = (x1, y1, x2, y2) => {
-        if ((y1 < tpl.netV) === (y2 < tpl.netV)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
-        const t = (tpl.netV - y1) / (y2 - y1);
-        const xCross = x1 + (x2 - x1) * t;
-        const pBack = netBackZone.map(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
-        const pFront = netFrontZone.map(xCross, 0); // punto de cruce, lado delantero (base)
-        if (y1 < tpl.netV) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
-        return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
-      };
+      // ---- CORRECCIÓN: Se dibujan las líneas y flechas continuas y rectas sin cortarlas en la red ----
+      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
@@ -853,7 +810,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         }
       };
 
-      // trazos a mano alzada (se parten en cada cruce de la red)
+      // Trazos
       for (const s of project.strokes) {
         if (!s.points || s.points.length < 2) continue;
         for (let i = 0; i < s.points.length - 1; i++) {
@@ -861,7 +818,8 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           strokeSegments(mapSegment(p1.x, p1.y, p2.x, p2.y), s.color, 5);
         }
       }
-      // flechas (la punta siempre se dibuja en su posición real; si cruza la red, el trazo salta)
+
+      // Flechas
       for (const a of project.arrows) {
         const segs = mapSegment(a.x1, a.y1, a.x2, a.y2);
         strokeSegments(segs, a.color, 5.5);
@@ -875,12 +833,11 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.closePath();
         octx.fillStyle = a.color; octx.fill();
       }
-      // conos: mismo tamaño RELATIVO que en la pizarra 2D (CONE_SIZE_RATIO), escalado según el
-      // ancho real de la pista a esa profundidad — así crecen con la perspectiva real de la foto
-      // en vez de con una fórmula fija, y no salen desproporcionados/gigantes.
+
+      // Conos
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
-        const size = (courtWidthAt(c.y) * CONE_SIZE_RATIO) / 1.7; // 1.7 ≈ ancho del triángulo / size
+        const size = (courtWidthAt(c.y) * CONE_SIZE_RATIO) / 1.7;
         octx.beginPath();
         octx.moveTo(px, py - size);
         octx.lineTo(px + size * 0.85, py + size * 0.8);
@@ -891,7 +848,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       doc.addImage(ovCanvas.toDataURL("image/png"), "PNG", 0, 0, tplW, tplH);
 
-      // Fecha y coach, arriba a la derecha, sobre la plantilla
+      // Fecha y coach
       doc.setFontSize(9);
       doc.setTextColor(90);
       doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, 14, { align: "right" });
@@ -901,7 +858,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         doc.text(coachName, pageW - marginX, 19, { align: "right" });
       }
 
-      // Nombre del entreno, en el hueco de la cabecera junto al logo
+      // Nombre del entreno
       let hy = 20;
       doc.setFontSize(8.5);
       doc.setTextColor(5, 150, 105);
@@ -917,7 +874,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       y = tplH + 12;
 
-      // Cabecera compacta reutilizada solo si las anotaciones necesitan página(s) adicionales
       const drawCompactHeader = () => {
         let hy = 14;
         if (logoImgData) doc.addImage(logoImgData, "PNG", marginX, hy - 5, 24, 12);
@@ -931,7 +887,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         return hy + 20;
       };
 
-      // ---- Anotaciones: solo lo que el entrenador ha escrito, paginando si no cabe ----
+      // Anotaciones
       const notes = (project.notes || "").trim();
       if (notes) {
         doc.setFontSize(11.5);
@@ -970,9 +926,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
     }
   };
 
-  // Convierte coordenadas de pantalla a coordenadas normalizadas (0-1) dentro del SVG,
-  // usando la matriz de transformación nativa del navegador (getScreenCTM). Esto es
-  // exacto siempre, sin necesidad de calcular manualmente offsets ni aspect-ratios.
   const getSvgPoint = (e) => {
     const svg = svgRef.current;
     const touch = e.touches && e.touches.length ? e.touches[0] : (e.changedTouches && e.changedTouches.length ? e.changedTouches[0] : e);
@@ -1011,7 +964,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
     for (let i = cones.length - 1; i >= 0; i--) {
       const c = cones[i];
       const dx = pt.x - c.x;
-      const dy = (pt.y - c.y) * (VB_H / VB_W); // compensar proporción no cuadrada del viewBox
+      const dy = (pt.y - c.y) * (VB_H / VB_W);
       if (Math.hypot(dx, dy) < thresh) return c.id;
     }
     return null;
@@ -1152,8 +1105,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       setSelectedConeId(null);
     }
   };
-
-  // ---- Panel de notas: se abre/cierra con el botón "A" de la barra de herramientas ----
 
   return (
     <div className="flex-1 flex flex-col min-h-0 relative" style={{ height: "100%", maxHeight: "100%" }}>
