@@ -146,12 +146,10 @@ export default function App() {
   const [inputValue, setInputValue] = useState("");
   const [selectedArrowId, setSelectedArrowId] = useState(null);
 
-  // "premium" solo si Supabase lo marca explícitamente en user_metadata; cualquier otro caso (incluido null) es "free".
   const plan = user?.user_metadata?.plan === "premium" ? "premium" : "free";
 
   useEffect(() => {
     (async () => {
-      // 1. ¿Venimos de hacer clic en el enlace del email?
       try {
         const hash = window.location.hash;
         if (hash && hash.includes("access_token")) {
@@ -172,7 +170,6 @@ export default function App() {
         }
       } catch (e) {}
 
-      // 2. ¿Tenemos una sesión guardada de antes?
       try {
         const stored = sessionStore.get();
         if (stored) {
@@ -796,8 +793,26 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         return Math.hypot(xR - xL, yR - yL);
       };
 
-      // ---- CORRECCIÓN: Se dibujan las líneas y flechas continuas y rectas sin cortarlas en la red ----
-      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
+      // Recalculamos las zonas de la red que eliminé por error
+      const netBackZone = zones.find(z => z.vTo === tpl.netV);
+      const netFrontZone = zones.find(z => z.vFrom === tpl.netV);
+
+      // ---- CORRECCIÓN CONDICIONADA ----
+      const mapSegment = (x1, y1, x2, y2) => {
+        if (isTenis) {
+          // Lógica original para tenis: salto invisible en la red y respeto de los márgenes 3D
+          if ((y1 < tpl.netV) === (y2 < tpl.netV)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
+          const t = (tpl.netV - y1) / (y2 - y1);
+          const xCross = x1 + (x2 - x1) * t;
+          const pBack = netBackZone.map(xCross, 1);
+          const pFront = netFrontZone.map(xCross, 0);
+          if (y1 < tpl.netV) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
+          return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
+        } else {
+          // Nueva lógica para pádel: línea recta y continua
+          return [[mapPt(x1, y1), mapPt(x2, y2)]];
+        }
+      };
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
