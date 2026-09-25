@@ -742,9 +742,12 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         tenis: {
           src: "/pdf-template-tenis.png",
           netV: 0.5,
+          // Corrección clave: L0 y R0 encajan perfecto con las coordenadas BL/BR
+          // y el salto en la red desaparece porque ambas zonas confluyen
+          // exactamente en las mismas coordenadas de la base de la red (NET_BASE).
           zones: [
-            { vFrom: 0,   vTo: 0.5, L0: [289, 291], R0: [769, 296], L1: [277, 418], R1: [820, 418] },
-            { vFrom: 0.5, vTo: 1,   L0: [272, 470], R0: [842, 470], L1: [249, 712], R1: [941, 707] },
+            { vFrom: 0,   vTo: 0.5, L0: [352, 301], R0: [700, 300], L1: [299, 466], R1: [752, 465] },
+            { vFrom: 0.5, vTo: 1,   L0: [299, 466], R0: [752, 465], L1: [225, 713], R1: [824, 712] },
           ],
         },
       };
@@ -793,26 +796,8 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         return Math.hypot(xR - xL, yR - yL);
       };
 
-      // Recalculamos las zonas de la red que eliminé por error
-      const netBackZone = zones.find(z => z.vTo === tpl.netV);
-      const netFrontZone = zones.find(z => z.vFrom === tpl.netV);
-
-      // ---- CORRECCIÓN CONDICIONADA ----
-      const mapSegment = (x1, y1, x2, y2) => {
-        if (isTenis) {
-          // Lógica original para tenis: salto invisible en la red y respeto de los márgenes 3D
-          if ((y1 < tpl.netV) === (y2 < tpl.netV)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
-          const t = (tpl.netV - y1) / (y2 - y1);
-          const xCross = x1 + (x2 - x1) * t;
-          const pBack = netBackZone.map(xCross, 1);
-          const pFront = netFrontZone.map(xCross, 0);
-          if (y1 < tpl.netV) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
-          return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
-        } else {
-          // Nueva lógica para pádel: línea recta y continua
-          return [[mapPt(x1, y1), mapPt(x2, y2)]];
-        }
-      };
+      // Mapeo unificado, rectilíneo y continuo para los dos deportes.
+      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
