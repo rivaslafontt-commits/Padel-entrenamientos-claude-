@@ -742,11 +742,15 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const marginX = 14, marginBottom = 16;
       let y;
 
-      // ---- Plantilla fotorrealista fija (una por deporte) + esquinas reales medidas sobre ella.
-      // Las esquinas BL/BR/FL/FR están puestas EXACTAMENTE sobre las líneas blancas reales de
-      // fondo (ignorando cualquier margen de pista que rodee el campo en la foto, que no existe
-      // en la pizarra 2D). La red se calibra con DOS referencias — NET_TOP (cordón superior) y
-      // NET_BASE (donde toca el suelo) — y se trata como una banda infranqueable: nada de lo que
+      // ---- Plantilla fotorrealista fija (una por deporte) + puntos reales medidos sobre ella.
+      // La pista se divide en VARIAS ZONAS horizontales (no solo fondo/red/frente), cada una con
+      // su propia homografía. Esto es necesario porque una única transformación de perspectiva
+      // para toda la mitad trasera o toda la delantera no reproduce bien los puntos intermedios
+      // (como la línea de servicio): el error se concentra justo ahí, en medio de cada mitad.
+      // Por eso en pádel añadimos la línea de servicio de cada lado como frontera extra —igual
+      // que ya se hacía con NET_TOP/NET_BASE— y la pista queda en 4 zonas en vez de 2.
+      // La red se sigue calibrando con DOS referencias — NET_TOP (cordón superior) y NET_BASE
+      // (donde toca el suelo) — y se sigue tratando como una banda infranqueable: nada de lo que
       // dibuje el profesor puede caer dentro de esa franja. Todo lo que en la pizarra 2D esté
       // justo detrás de la red (v<0.5) se queda como mucho en NET_TOP; todo lo que esté justo
       // delante (v>=0.5) empieza como mínimo en NET_BASE. Las líneas/flechas que cruzan la red
@@ -754,19 +758,22 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const TEMPLATES = {
         padel: {
           src: "/pdf-template-padel.png",
-          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
-          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
-          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
+          netV: 0.5,
+          // v=0 fondo … v=1 frente. Cada zona: fila izq/dcha al empezar (L0/R0) y al terminar (L1/R1).
+          zones: [
+            { vFrom: 0,    vTo: 0.18, L0: [318, 272], R0: [737, 263], L1: [294, 312], R1: [759, 313] },
+            { vFrom: 0.18, vTo: 0.5,  L0: [294, 312], R0: [759, 313], L1: [263, 397], R1: [790, 397] },
+            { vFrom: 0.5,  vTo: 0.82, L0: [240, 450], R0: [812, 450], L1: [175, 597], R1: [870, 598] },
+            { vFrom: 0.82, vTo: 1,    L0: [175, 597], R0: [870, 598], L1: [157, 637], R1: [886, 637] },
+          ],
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          // single: true => una sola homografía para toda la pista (las flechas cruzan la red
-          // sin partirse y siguen siendo rectas). BL/BR/FR/FL son las esquinas "equivalentes"
-          // que mejor encajan con TODAS las líneas blancas de la foto a la vez (error máx. ~6 px).
-          single: true,
-          BL: [345.9, 302.4], BR: [705.6, 302.4], FR: [822.4, 717.4], FL: [226.3, 717.3],
-          NET_TOP_L: [314, 418], NET_TOP_R: [736, 418],
-          NET_BASE_L: [300, 466], NET_BASE_R: [751, 466],
+          netV: 0.5,
+          zones: [
+            { vFrom: 0,   vTo: 0.5, L0: [289, 291], R0: [769, 296], L1: [277, 418], R1: [820, 418] },
+            { vFrom: 0.5, vTo: 1,   L0: [272, 470], R0: [842, 470], L1: [249, 712], R1: [941, 707] },
+          ],
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
@@ -784,7 +791,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       // ---- Overlay: los dibujos reales del profesor (flechas, conos, trazos), colocados con
       // perspectiva real sobre la foto ----
-      const { BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R } = tpl;
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -803,26 +809,36 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
           return [(a * u + b * v + c) / denom, (d * u + e * v + f) / denom];
         };
       };
-      // Fondo→cordón superior de la red (nunca pasa de ahí) / base de la red→frente (nunca empieza antes)
-      const backMap = computeHomography([BL, BR, NET_TOP_R, NET_TOP_L]);
-      const frontMap = computeHomography([NET_BASE_L, NET_BASE_R, FR, FL]);
-      // Tenis: una sola homografía para toda la pista (líneas continuas y rectas también al
-      // cruzar la red). Pádel: dos mitades con banda de red infranqueable.
-      const singleMap = tpl.single ? computeHomography([BL, BR, FR, FL]) : null;
-      const mapPt = (u, v) => singleMap
-        ? singleMap(u, v)
-        : (v < 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
 
-      // Para un segmento que cruza v=0.5: la parte trasera llega hasta el cordón superior de la
-      // red, la parte delantera empieza en la base — la línea "salta" la red en vez de atravesarla.
+      // Una homografía independiente por zona: cada una es exacta en sus dos extremos, así que
+      // con 4 zonas en vez de 2 el punto intermedio de cada una (p.ej. la línea de servicio) cae
+      // justo donde toca en la foto, en vez de arrastrar el error de un tramo mucho más largo.
+      const zones = tpl.zones.map(z => ({ ...z, map: computeHomography([z.L0, z.R0, z.R1, z.L1]) }));
+      const zoneFor = (v) => zones.find(z => v < z.vTo) || zones[zones.length - 1];
+      const mapPt = (u, v) => {
+        const z = zoneFor(v);
+        return z.map(u, (v - z.vFrom) / (z.vTo - z.vFrom));
+      };
+      // Ancho real (en píxeles de la foto) de la pista a una profundidad v — se usa para escalar
+      // los conos con la misma perspectiva con la que se ve la propia pista en cada zona.
+      const courtWidthAt = (v) => {
+        const [xL, yL] = mapPt(0, v);
+        const [xR, yR] = mapPt(1, v);
+        return Math.hypot(xR - xL, yR - yL);
+      };
+
+      // La red sigue siendo infranqueable exactamente igual que antes: un segmento que la cruza
+      // "salta" de la zona que toca el cordón superior por detrás a la que toca la base por
+      // delante, en vez de atravesarla en línea recta.
+      const netBackZone = zones.find(z => z.vTo === tpl.netV);
+      const netFrontZone = zones.find(z => z.vFrom === tpl.netV);
       const mapSegment = (x1, y1, x2, y2) => {
-        if (singleMap) return [[mapPt(x1, y1), mapPt(x2, y2)]];
-        if ((y1 < 0.5) === (y2 < 0.5)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
-        const t = (0.5 - y1) / (y2 - y1);
+        if ((y1 < tpl.netV) === (y2 < tpl.netV)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
+        const t = (tpl.netV - y1) / (y2 - y1);
         const xCross = x1 + (x2 - x1) * t;
-        const pBack = backMap(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
-        const pFront = frontMap(xCross, 0); // punto de cruce, lado delantero (base)
-        if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
+        const pBack = netBackZone.map(xCross, 1);   // punto de cruce, lado trasero (cordón superior)
+        const pFront = netFrontZone.map(xCross, 0); // punto de cruce, lado delantero (base)
+        if (y1 < tpl.netV) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
         return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
       };
 
@@ -859,26 +875,16 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.closePath();
         octx.fillStyle = a.color; octx.fill();
       }
-      // conos. Tenis: mismo tamaño relativo que en la pizarra 2D (CONE_SIZE_RATIO del ancho de
-      // la pista), escalado por la perspectiva (más pequeño al fondo, más grande cerca) y con la
-      // base apoyada en el punto marcado. CONE_PDF_SCALE los agranda/reduce (1 = idéntico a 2D; 1.6 = algo mayor para que se lean en el A4).
-      // Pádel: se mantiene el tamaño de siempre.
-      const CONE_PDF_SCALE = 1.6;
+      // conos: mismo tamaño RELATIVO que en la pizarra 2D (CONE_SIZE_RATIO), escalado según el
+      // ancho real de la pista a esa profundidad — así crecen con la perspectiva real de la foto
+      // en vez de con una fórmula fija, y no salen desproporcionados/gigantes.
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
+        const size = (courtWidthAt(c.y) * CONE_SIZE_RATIO) / 1.7; // 1.7 ≈ ancho del triángulo / size
         octx.beginPath();
-        if (singleMap) {
-          const courtWidthPx = Math.abs(mapPt(1, c.y)[0] - mapPt(0, c.y)[0]);
-          const size = courtWidthPx * CONE_SIZE_RATIO * CONE_PDF_SCALE;
-          octx.moveTo(px, py - size * 0.95);
-          octx.lineTo(px + size * 0.39, py);
-          octx.lineTo(px - size * 0.39, py);
-        } else {
-          const size = 14 + 16 * c.y; // c.y: 0 (fondo) a 1 (frente)
-          octx.moveTo(px, py - size);
-          octx.lineTo(px + size * 0.85, py + size * 0.8);
-          octx.lineTo(px - size * 0.85, py + size * 0.8);
-        }
+        octx.moveTo(px, py - size);
+        octx.lineTo(px + size * 0.85, py + size * 0.8);
+        octx.lineTo(px - size * 0.85, py + size * 0.8);
         octx.closePath();
         octx.fillStyle = c.color; octx.fill();
       }
