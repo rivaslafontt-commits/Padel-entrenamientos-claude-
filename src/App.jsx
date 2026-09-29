@@ -519,6 +519,7 @@ export default function App() {
           onDeleteFolder={deleteFolder}
           onRenameFolder={(id, name) => { setModal({ type: "renameFolder", folderId: id }); setInputValue(name); }}
           onSignOut={doSignOut}
+          onOpenAccount={() => setModal({ type: "account" })}
         />
       )}
 
@@ -565,6 +566,23 @@ export default function App() {
       {modal?.type === "upgrade" && (
         <UpgradeModal reason={modal.reason} onCancel={closeModal} />
       )}
+      {modal?.type === "account" && (
+        <AccountModal userEmail={user?.email} onSignOut={doSignOut}
+          onAskDelete={() => setModal({ type: "deleteAccount" })} onCancel={closeModal} />
+      )}
+      {modal?.type === "deleteAccount" && (
+        <DeleteAccountModal userEmail={user?.email}
+          onConfirm={async () => {
+            try {
+              await sb.rpc("delete_own_account");
+            } finally {
+              sessionStore.clear();
+              setUser(null); setFolders([]); setDataLoaded(false); setSubscription(null);
+              setView({ screen: "home" }); setEmail(""); setName(""); setAuthState("signedOut");
+            }
+          }}
+          onCancel={() => setModal({ type: "account" })} />
+      )}
     </div>
   );
 }
@@ -588,6 +606,61 @@ function LegalFooter() {
 }
 
 // =============== MODAL DE LÍMITE FREE / UPGRADE ===============
+function AccountModal({ userEmail, onSignOut, onAskDelete, onCancel }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-slate-800">Mi cuenta</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <p className="text-sm text-slate-500 mb-6 break-all">{userEmail}</p>
+        <button onClick={onSignOut}
+          className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium py-2.5 rounded-lg mb-6">
+          <LogOut size={14} /> Cerrar sesión
+        </button>
+        <button onClick={onAskDelete} className="text-xs text-slate-300 hover:text-red-400 underline underline-offset-2">
+          Eliminar mi cuenta
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DeleteAccountModal({ userEmail, onConfirm, onCancel }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const canDelete = typed.trim().toLowerCase() === (userEmail || "").toLowerCase();
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm">
+        <h3 className="font-bold text-red-600 mb-2">Eliminar cuenta</h3>
+        <p className="text-sm text-slate-500 mb-4">
+          Se borrarán tu cuenta y todas tus carpetas y entrenos, sin poder deshacerlo.
+          Para confirmar, escribe tu correo (<span className="font-medium">{userEmail}</span>).
+        </p>
+        <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="tu@correo.com"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-red-300" />
+        {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
+        <div className="flex gap-2 mt-4">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium">Cancelar</button>
+          <button
+            disabled={!canDelete || busy}
+            onClick={async () => {
+              setBusy(true); setError("");
+              try { await onConfirm(); }
+              catch (e) { setError("No se ha podido eliminar. Inténtalo de nuevo."); setBusy(false); }
+            }}
+            className="flex-1 py-2.5 rounded-lg bg-red-500 disabled:bg-red-200 hover:bg-red-600 text-white text-sm font-medium">
+            {busy ? "Eliminando…" : "Eliminar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UpgradeModal({ reason, onCancel }) {
   const text = reason === "folders"
     ? `Tu plan gratuito permite hasta ${FREE_MAX_FOLDERS} carpetas. Pásate a premium para crear carpetas sin límite.`
@@ -618,7 +691,7 @@ function UpgradeModal({ reason, onCancel }) {
 }
 
 // =============== HOME SCREEN ===============
-function HomeScreen({ folders, plan, userName, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
+function HomeScreen({ folders, plan, userName, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut, onOpenAccount }) {
   // Si el plan es free y hay más carpetas de las permitidas (p. ej. tras acabar
   // la prueba), se quedan las más antiguas activas y el resto bloqueadas.
   const lockedIds = plan === "free"
@@ -630,7 +703,11 @@ function HomeScreen({ folders, plan, userName, userEmail, onOpenFolder, onNewFol
       <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800 tracking-tight"><img src="/tedel-logo.png" alt="Tedel" className="h-6 w-auto" /> Pádel & Tenis Coach</h1>
-          {(userName || userEmail) && <p className="text-xs text-slate-400">{userName || userEmail}</p>}
+          {(userName || userEmail) && (
+            <button onClick={() => onOpenAccount()} className="text-xs text-slate-400 hover:text-slate-600 hover:underline">
+              {userName || userEmail}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={onNewFolder} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">
