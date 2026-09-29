@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown, Triangle, Download, Crown } from "lucide-react";
+import { Folder, FolderPlus, FilePlus, ArrowLeft, Trash2, Pencil, Eraser, MousePointer2, MoveRight, X, Check, Palette, LogOut, Mail, Loader2, ChevronUp, ChevronDown, Triangle, Download, Crown, Lock } from "lucide-react";
 
 // ============================================================
 // CONFIGURA AQUÍ TUS CLAVES DE SUPABASE
@@ -13,6 +13,7 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 
 const FREE_MAX_FOLDERS = 2;
 const FREE_MAX_PROJECTS_PER_FOLDER = 3;
+const TERMS_VERSION = "2026-09-28"; // debe coincidir con la fecha de /legal/terminos.html
 
 function makeSupabase(url, key) {
   let accessToken = null;
@@ -111,6 +112,15 @@ function makeSupabase(url, key) {
       if (!res.ok) throw new Error(`Error eliminando en ${table}`);
       return true;
     },
+    async rpc(fn, params = {}) {
+      const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) throw new Error(`Error llamando a ${fn}`);
+      try { return await res.json(); } catch (e) { return null; }
+    },
   };
 }
 
@@ -148,7 +158,14 @@ export default function App() {
   const [inputValue, setInputValue] = useState("");
   const [selectedArrowId, setSelectedArrowId] = useState(null);
 
-  const plan = user?.user_metadata?.plan === "premium" ? "premium" : "free";
+  // Plan real: viene de la tabla subscriptions (RLS, solo lectura),
+  // no de user_metadata, que el propio usuario podía editar.
+  const [subscription, setSubscription] = useState(null);
+  const trialEndsAt = subscription?.trial_ends_at ? new Date(subscription.trial_ends_at) : null;
+  const trialDaysLeft = trialEndsAt ? Math.ceil((trialEndsAt - Date.now()) / 86400000) : null;
+  const trialActive = trialEndsAt ? trialEndsAt.getTime() > Date.now() : false;
+  const plan = subscription?.plan === "premium" || trialActive ? "premium" : "free";
+  const trialJustEnded = subscription && subscription.plan !== "premium" && trialEndsAt && !trialActive;
 
   useEffect(() => {
     (async () => {
@@ -190,6 +207,14 @@ export default function App() {
 
   useEffect(() => {
     if (authState !== "signedIn") return;
+    sb.rpc("confirm_consent").catch(() => {}); // enlaza el consentimiento con este usuario, no bloquea si falla
+    sb.select("subscriptions", "select=plan,trial_ends_at")
+      .then(rows => setSubscription(rows?.[0] || { plan: "free", trial_ends_at: null }))
+      .catch(() => setSubscription({ plan: "free", trial_ends_at: null }));
+  }, [authState]);
+
+  useEffect(() => {
+    if (authState !== "signedIn") return;
     (async () => {
       try {
         setDataError("");
@@ -228,18 +253,16 @@ export default function App() {
 
     setAuthBusy(true);
     try {
-      await sb.signInWithOtp(email.trim(), window.location.origin + window.location.pathname, name.trim());
-      
-      try {
-        await sb.insert("user_consents", {
-          accepted_privacy: acceptedPrivacy,
-          accepted_terms: acceptedTerms,
-          accepted_marketing: acceptedUpdates,
-          privacy_version: 'v1.0',
-          terms_version: 'v1.0',
-        });
-      } catch (err) {}
+      // Registro del consentimiento ANTES de enviar el enlace (tabla consent_log).
+      await sb.insert("consent_log", {
+        email: email.trim().toLowerCase(),
+        terms_version: TERMS_VERSION,
+        terms_accepted: acceptedPrivacy && acceptedTerms,
+        marketing_opt_in: acceptedUpdates,
+        user_agent: (navigator.userAgent || "").slice(0, 300),
+      });
 
+      await sb.signInWithOtp(email.trim(), window.location.origin + window.location.pathname, name.trim());
       setLinkSentTo(email.trim());
       setAuthState("linkSent");
     } catch (e) {
@@ -252,7 +275,7 @@ export default function App() {
   const doSignOut = async () => {
     await sb.signOut();
     sessionStore.clear();
-    setUser(null); setFolders([]); setDataLoaded(false);
+    setUser(null); setFolders([]); setDataLoaded(false); setSubscription(null);
     setView({ screen: "home" }); setEmail(""); setName(""); setAuthError(""); setLinkSentTo("");
     setAuthState("signedOut");
   };
@@ -427,6 +450,9 @@ export default function App() {
                 Enviar enlace de acceso
               </button>
               <p className="text-xs text-slate-400 text-center mt-3">Te enviaremos un enlace de un solo uso, sin contraseñas.</p>
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg text-center mt-3 py-2 px-2 font-medium">
+                🎾 Al registrarte estrenas 14 días de Tedel Premium, sin coste.
+              </p>
             </>
           )}
 
@@ -464,14 +490,25 @@ export default function App() {
         </div>
       )}
 
+      {trialActive && trialDaysLeft > 0 && trialDaysLeft <= 14 && (
+        <div className="bg-emerald-50 border-b border-emerald-200 text-emerald-700 text-xs px-3 py-2 text-center font-medium">
+          🎾 Prueba Premium: te quedan {trialDaysLeft} {trialDaysLeft === 1 ? "día" : "días"}.
+        </div>
+      )}
+      {trialJustEnded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-700 text-xs px-3 py-2 text-center font-medium">
+          Tu prueba Premium ha terminado. Las carpetas de más quedan bloqueadas hasta que te hagas premium.
+        </div>
+      )}
+
       {!dataLoaded && (
         <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-500" size={24} /></div>
       )}
 
       {dataLoaded && view.screen === "home" && (
         <HomeScreen
-          folders={folders} userName={user?.user_metadata?.full_name} userEmail={user?.email}
-          onOpenFolder={(id) => setView({ screen: "folder", folderId: id })}
+          folders={folders} plan={plan} userName={user?.user_metadata?.full_name} userEmail={user?.email}
+          onOpenFolder={(id, locked) => locked ? setModal({ type: "upgrade", reason: "locked" }) : setView({ screen: "folder", folderId: id })}
           onNewFolder={() => {
             if (plan === "free" && folders.length >= FREE_MAX_FOLDERS) {
               setModal({ type: "upgrade", reason: "folders" });
@@ -556,6 +593,8 @@ function UpgradeModal({ reason, onCancel }) {
     ? `Tu plan gratuito permite hasta ${FREE_MAX_FOLDERS} carpetas. Pásate a premium para crear carpetas sin límite.`
     : reason === "projects"
     ? `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} entrenos por carpeta. Pásate a premium para crear entrenos sin límite.`
+    : reason === "locked"
+    ? `Esta carpeta se creó durante tu prueba Premium. Hazte premium para volver a acceder a ella.`
     : `Exportar a PDF es una función premium. Pásate a premium para descargar tus pizarras en PDF.`;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -579,7 +618,13 @@ function UpgradeModal({ reason, onCancel }) {
 }
 
 // =============== HOME SCREEN ===============
-function HomeScreen({ folders, userName, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
+function HomeScreen({ folders, plan, userName, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
+  // Si el plan es free y hay más carpetas de las permitidas (p. ej. tras acabar
+  // la prueba), se quedan las más antiguas activas y el resto bloqueadas.
+  const lockedIds = plan === "free"
+    ? new Set(folders.slice(FREE_MAX_FOLDERS).map(f => f.id))
+    : new Set();
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
@@ -604,18 +649,25 @@ function HomeScreen({ folders, userName, userEmail, onOpenFolder, onNewFolder, o
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {folders.map(folder => (
-              <div key={folder.id} onClick={() => onOpenFolder(folder.id)}
-                className="group relative bg-white rounded-xl border border-slate-200 p-4 flex flex-col items-center gap-2 cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all">
-                <Folder size={36} className="text-emerald-500" strokeWidth={1.5} />
-                <span className="text-sm font-medium text-slate-700 text-center line-clamp-2">{folder.name}</span>
-                <span className="text-xs text-slate-400">{folder.projects.length} entreno{folder.projects.length !== 1 ? "s" : ""}</span>
-                <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={(e) => { e.stopPropagation(); onRenameFolder(folder.id, folder.name); }} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-500"><Pencil size={12} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar la carpeta "${folder.name}" y todo su contenido?`)) onDeleteFolder(folder.id); }} className="p-1.5 bg-slate-100 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500"><Trash2 size={12} /></button>
+            {folders.map(folder => {
+              const locked = lockedIds.has(folder.id);
+              return (
+                <div key={folder.id} onClick={() => onOpenFolder(folder.id, locked)}
+                  className={`group relative bg-white rounded-xl border p-4 flex flex-col items-center gap-2 cursor-pointer transition-all ${locked ? "border-slate-200 opacity-60" : "border-slate-200 hover:border-emerald-400 hover:shadow-md"}`}>
+                  {locked ? <Lock size={36} className="text-slate-400" strokeWidth={1.5} /> : <Folder size={36} className="text-emerald-500" strokeWidth={1.5} />}
+                  <span className="text-sm font-medium text-slate-700 text-center line-clamp-2">{folder.name}</span>
+                  <span className="text-xs text-slate-400">
+                    {locked ? "Bloqueada · hazte premium" : `${folder.projects.length} entreno${folder.projects.length !== 1 ? "s" : ""}`}
+                  </span>
+                  {!locked && (
+                    <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); onRenameFolder(folder.id, folder.name); }} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-500"><Pencil size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar la carpeta "${folder.name}" y todo su contenido?`)) onDeleteFolder(folder.id); }} className="p-1.5 bg-slate-100 hover:bg-red-100 rounded-md text-slate-500 hover:text-red-500"><Trash2 size={12} /></button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
