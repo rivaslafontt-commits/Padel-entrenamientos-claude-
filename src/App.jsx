@@ -11,11 +11,9 @@ const SUPABASE_ANON_KEY = "sb_publishable_8CrcBtHiApBXq22DeDru7g_UpTET0GM";
 const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#111827"];
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-// ---- Límites del plan gratuito (Paso 1 de la versión free/premium) ----
 const FREE_MAX_FOLDERS = 2;
 const FREE_MAX_PROJECTS_PER_FOLDER = 3;
 
-// ---- Mini cliente REST para Supabase (sin librerías externas) ----
 function makeSupabase(url, key) {
   let accessToken = null;
   let refreshToken = null;
@@ -118,7 +116,6 @@ function makeSupabase(url, key) {
 
 const sb = makeSupabase(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ---- Guardado del token de sesión en el navegador del usuario ----
 const TOKEN_KEY = "padel-coach-refresh-token";
 const sessionStore = {
   get() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } },
@@ -134,6 +131,11 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [linkSentTo, setLinkSentTo] = useState("");
+
+  // ESTADOS PARA EL CUMPLIMIENTO LEGAL
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedUpdates, setAcceptedUpdates] = useState(false);
 
   const [folders, setFolders] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -217,9 +219,27 @@ export default function App() {
     setAuthError("");
     if (!name.trim()) { setAuthError("Introduce tu nombre."); return; }
     if (!email.trim() || !email.includes("@")) { setAuthError("Introduce un email válido."); return; }
+    
+    // COMPROBACIÓN LEGAL OBLIGATORIA
+    if (!acceptedPrivacy || !acceptedTerms) {
+      setAuthError("Por favor, acepta la Política de Privacidad y los Términos de Servicio para continuar.");
+      return;
+    }
+
     setAuthBusy(true);
     try {
       await sb.signInWithOtp(email.trim(), window.location.origin + window.location.pathname, name.trim());
+      
+      try {
+        await sb.insert("user_consents", {
+          accepted_privacy: acceptedPrivacy,
+          accepted_terms: acceptedTerms,
+          accepted_marketing: acceptedUpdates,
+          privacy_version: 'v1.0',
+          terms_version: 'v1.0',
+        });
+      } catch (err) {}
+
       setLinkSentTo(email.trim());
       setAuthState("linkSent");
     } catch (e) {
@@ -323,7 +343,7 @@ export default function App() {
 
   if (authState === "loading") {
     return (
-      <div className="h-full w-full flex items-center justify-center bg-slate-50">
+      <div className="h-screen w-full flex items-center justify-center bg-slate-50">
         <Loader2 className="animate-spin text-emerald-500" size={28} />
       </div>
     );
@@ -331,9 +351,11 @@ export default function App() {
 
   if (authState === "signedOut" || authState === "linkSent") {
     return (
-      <div className="h-full w-full flex items-center justify-center bg-slate-50 p-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 w-full max-w-sm">
-          <div className="flex items-center justify-center mb-4"><img src="/tedel-logo.png" alt="Tedel" className="h-12 w-auto" /></div>
+      <div className="min-h-screen w-full flex flex-col justify-between bg-slate-50 p-4 overflow-y-auto">
+        <div className="my-auto mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-6 w-full max-w-sm">
+          <div className="flex items-center justify-center mb-4">
+            <img src="/tedel-logo.png" alt="Tedel" className="h-12 w-auto" />
+          </div>
           <h1 className="text-lg font-bold text-slate-800 text-center mb-1">Pádel & Tenis Coach</h1>
           <p className="text-sm text-slate-500 text-center mb-6">Pizarras tácticas para entrenadores</p>
 
@@ -344,13 +366,61 @@ export default function App() {
                 <input type="text" value={name} onChange={(e) => setName(e.target.value)}
                   placeholder="Tu nombre" className="flex-1 text-sm outline-none" />
               </div>
+
               <label className="text-xs font-semibold text-slate-500 mb-1 block">Tu email</label>
               <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 mb-3">
                 <Mail size={16} className="text-slate-400" />
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && sendLink()} placeholder="tu@email.com" className="flex-1 text-sm outline-none" />
               </div>
-              {authError && <p className="text-xs text-red-500 mb-3">{authError}</p>}
+
+              {/* CONTENEDOR DE LAS CASILLAS LEGALES */}
+              <div className="space-y-2.5 text-xs my-4 text-slate-600 border-t border-slate-100 pt-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={acceptedPrivacy}
+                    onChange={(e) => setAcceptedPrivacy(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>
+                    He leído y acepto la{" "}
+                    <a href="/legal/privacidad.html" target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium">
+                      Política de Privacidad
+                    </a>. *
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={acceptedTerms}
+                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>
+                    Acepto los{" "}
+                    <a href="/legal/terminos.html" target="_blank" rel="noreferrer" className="text-emerald-600 underline font-medium">
+                      Términos y Condiciones
+                    </a>. *
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2 cursor-pointer p-2.5 bg-slate-50 rounded-lg border border-slate-200/60 mt-1">
+                  <input
+                    type="checkbox"
+                    checked={acceptedUpdates}
+                    onChange={(e) => setAcceptedUpdates(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className="text-[11px] leading-tight text-slate-500">
+                    <strong>Deseo recibir novedades sobre Tedel:</strong> te enviaremos información sobre nuevas funciones, actualizaciones importantes y mejoras de la app. Prometemos no enviar correos innecesarios ni agobiantes, solo contenido relevante.
+                  </span>
+                </label>
+              </div>
+
+              {authError && <p className="text-xs text-red-500 mb-3 font-medium">{authError}</p>}
+
               <button onClick={sendLink} disabled={authBusy}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2">
                 {authBusy ? <Loader2 size={16} className="animate-spin" /> : null}
@@ -370,9 +440,6 @@ export default function App() {
               <p className="text-xs text-slate-500 text-center mb-4">
                 Abre tu correo <strong>desde este mismo dispositivo</strong> y pulsa el enlace para entrar. Revisa también la carpeta de spam.
               </p>
-              <p className="text-xs text-amber-600 text-center mb-3">
-                ¿Email equivocado? Pulsa abajo para escribir uno nuevo — el enlace anterior dejará de ser necesario.
-              </p>
               <button
                 onClick={() => { setAuthState("signedOut"); setAuthError(""); setEmail(""); setName(""); }}
                 className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-lg"
@@ -382,6 +449,8 @@ export default function App() {
             </>
           )}
         </div>
+
+        <LegalFooter />
       </div>
     );
   }
@@ -463,6 +532,24 @@ export default function App() {
   );
 }
 
+// =============== FOOTER LEGAL ===============
+function LegalFooter() {
+  return (
+    <footer className="w-full text-center py-3 text-[11px] text-slate-400 border-t border-slate-200 mt-auto bg-white">
+      <div className="flex justify-center space-x-3 mb-1">
+        <a href="/legal/aviso-legal.html" target="_blank" rel="noreferrer" className="hover:text-slate-600 underline">Aviso Legal</a>
+        <span>•</span>
+        <a href="/legal/privacidad.html" target="_blank" rel="noreferrer" className="hover:text-slate-600 underline">Política de Privacidad</a>
+        <span>•</span>
+        <a href="/legal/terminos.html" target="_blank" rel="noreferrer" className="hover:text-slate-600 underline">Términos y Condiciones</a>
+        <span>•</span>
+        <a href="/legal/cookies.html" target="_blank" rel="noreferrer" className="hover:text-slate-600 underline">Política de Cookies</a>
+      </div>
+      <p>© 2026 Tedel. Todos los derechos reservados.</p>
+    </footer>
+  );
+}
+
 // =============== MODAL DE LÍMITE FREE / UPGRADE ===============
 function UpgradeModal({ reason, onCancel }) {
   const text = reason === "folders"
@@ -494,7 +581,7 @@ function UpgradeModal({ reason, onCancel }) {
 // =============== HOME SCREEN ===============
 function HomeScreen({ folders, userName, userEmail, onOpenFolder, onNewFolder, onDeleteFolder, onRenameFolder, onSignOut }) {
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800 tracking-tight"><img src="/tedel-logo.png" alt="Tedel" className="h-6 w-auto" /> Pádel & Tenis Coach</h1>
@@ -532,6 +619,8 @@ function HomeScreen({ folders, userName, userEmail, onOpenFolder, onNewFolder, o
           </div>
         )}
       </div>
+
+      <LegalFooter />
     </div>
   );
 }
@@ -598,7 +687,6 @@ function MiniCourtPreview({ sport, arrows, strokes, cones }) {
   );
 }
 
-// =============== COURT LINES ===============
 function PadelCourtLines({ w, h }) {
   const stroke = "#0f766e";
   const strokeWidth = 2;
@@ -691,7 +779,6 @@ function ConeSvg({ x, y, color, size = 10, selected }) {
   );
 }
 
-// =============== PROJECT SCREEN ===============
 const VB_W = 300;
 const VB_H = 480;
 
@@ -731,24 +818,15 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const TEMPLATES = {
         padel: {
           src: "/pdf-template-padel.png",
-          netV: 0.5,
-          zones: [
-            { vFrom: 0,    vTo: 0.18, L0: [319, 260], R0: [736, 260], L1: [303, 295], R1: [754, 290] },
-            { vFrom: 0.18, vTo: 0.5,  L0: [303, 295], R0: [754, 290], L1: [244, 396], R1: [809, 396] },
-            { vFrom: 0.5,  vTo: 0.82, L0: [248, 452], R0: [806, 450], L1: [170, 624], R1: [891, 624] },
-            { vFrom: 0.82, vTo: 1,    L0: [170, 624], R0: [891, 624], L1: [118, 737], R1: [934, 734] },
-          ],
+          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
+          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
+          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          netV: 0.5,
-          // Corrección clave: L0 y R0 encajan perfecto con las coordenadas BL/BR
-          // y el salto en la red desaparece porque ambas zonas confluyen
-          // exactamente en las mismas coordenadas de la base de la red (NET_BASE).
-          zones: [
-            { vFrom: 0,   vTo: 0.5, L0: [352, 301], R0: [700, 300], L1: [299, 466], R1: [752, 465] },
-            { vFrom: 0.5, vTo: 1,   L0: [299, 466], R0: [752, 465], L1: [225, 713], R1: [824, 712] },
-          ],
+          BL: [289, 291], BR: [769, 296], FR: [941, 707], FL: [249, 712],
+          NET_TOP_L: [277, 418], NET_TOP_R: [820, 418],
+          NET_BASE_L: [272, 470], NET_BASE_R: [842, 470],
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
@@ -764,6 +842,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const tplH = tplW * tplAspect;
       doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
 
+      const { BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R } = tpl;
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -783,21 +862,19 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         };
       };
 
-      const zones = tpl.zones.map(z => ({ ...z, map: computeHomography([z.L0, z.R0, z.R1, z.L1]) }));
-      const zoneFor = (v) => zones.find(z => v < z.vTo) || zones[zones.length - 1];
-      const mapPt = (u, v) => {
-        const z = zoneFor(v);
-        return z.map(u, (v - z.vFrom) / (z.vTo - z.vFrom));
-      };
+      const backMap = computeHomography([BL, BR, NET_TOP_R, NET_TOP_L]);
+      const frontMap = computeHomography([NET_BASE_L, NET_BASE_R, FR, FL]);
+      const mapPt = (u, v) => (v < 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
 
-      const courtWidthAt = (v) => {
-        const [xL, yL] = mapPt(0, v);
-        const [xR, yR] = mapPt(1, v);
-        return Math.hypot(xR - xL, yR - yL);
+      const mapSegment = (x1, y1, x2, y2) => {
+        if ((y1 < 0.5) === (y2 < 0.5)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
+        const t = (0.5 - y1) / (y2 - y1);
+        const xCross = x1 + (x2 - x1) * t;
+        const pBack = backMap(xCross, 1);
+        const pFront = frontMap(xCross, 0);
+        if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
+        return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
       };
-
-      // Mapeo unificado, rectilíneo y continuo para los dos deportes.
-      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
@@ -810,7 +887,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         }
       };
 
-      // Trazos
       for (const s of project.strokes) {
         if (!s.points || s.points.length < 2) continue;
         for (let i = 0; i < s.points.length - 1; i++) {
@@ -819,7 +895,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         }
       }
 
-      // Flechas
       for (const a of project.arrows) {
         const segs = mapSegment(a.x1, a.y1, a.x2, a.y2);
         strokeSegments(segs, a.color, 5.5);
@@ -834,10 +909,9 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         octx.fillStyle = a.color; octx.fill();
       }
 
-      // Conos
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
-        const size = (courtWidthAt(c.y) * CONE_SIZE_RATIO) / 1.7;
+        const size = 14 + 16 * c.y;
         octx.beginPath();
         octx.moveTo(px, py - size);
         octx.lineTo(px + size * 0.85, py + size * 0.8);
@@ -848,7 +922,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       doc.addImage(ovCanvas.toDataURL("image/png"), "PNG", 0, 0, tplW, tplH);
 
-      // Fecha y coach
       doc.setFontSize(9);
       doc.setTextColor(90);
       doc.text(`FECHA: ${new Date().toLocaleDateString("es-ES")}`, pageW - marginX, 14, { align: "right" });
@@ -858,7 +931,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         doc.text(coachName, pageW - marginX, 19, { align: "right" });
       }
 
-      // Nombre del entreno
       let hy = 20;
       doc.setFontSize(8.5);
       doc.setTextColor(5, 150, 105);
@@ -887,7 +959,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         return hy + 20;
       };
 
-      // Anotaciones
       const notes = (project.notes || "").trim();
       if (notes) {
         doc.setFontSize(11.5);
@@ -1237,7 +1308,6 @@ function ToolBtn({ icon: Icon, active, onClick, label, compact }) {
   );
 }
 
-// =============== MODALES ===============
 function Modal({ title, value, setValue, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onCancel}>
