@@ -1029,6 +1029,12 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       // ninguna línea necesita partirse al cruzar la red.
       const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
 
+      const courtWidthAt = (v) => {
+        const [xL, yL] = mapPt(0, v);
+        const [xR, yR] = mapPt(1, v);
+        return Math.hypot(xR - xL, yR - yL);
+      };
+
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
       const octx = ovCanvas.getContext("2d");
@@ -1064,7 +1070,7 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
 
       for (const c of cones) {
         const [px, py] = mapPt(c.x, c.y);
-        const size = 14 + 16 * c.y;
+        const size = (courtWidthAt(c.y) * CONE_SIZE_RATIO) / 1.7;
         octx.beginPath();
         octx.moveTo(px, py - size);
         octx.lineTo(px + size * 0.85, py + size * 0.8);
