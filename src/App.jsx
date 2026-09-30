@@ -968,15 +968,21 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const TEMPLATES = {
         padel: {
           src: "/pdf-template-padel.png",
-          BL: [318, 272], BR: [737, 263], FR: [886, 637], FL: [157, 637],
-          NET_TOP_L: [263, 397], NET_TOP_R: [790, 397],
-          NET_BASE_L: [240, 450], NET_BASE_R: [812, 450],
+          netV: 0.5,
+          zones: [
+            { vFrom: 0,    vTo: 0.18, L0: [319, 260], R0: [736, 260], L1: [303, 295], R1: [754, 290] },
+            { vFrom: 0.18, vTo: 0.5,  L0: [303, 295], R0: [754, 290], L1: [244, 396], R1: [809, 396] },
+            { vFrom: 0.5,  vTo: 0.82, L0: [248, 452], R0: [806, 450], L1: [170, 624], R1: [891, 624] },
+            { vFrom: 0.82, vTo: 1,    L0: [170, 624], R0: [891, 624], L1: [118, 737], R1: [934, 734] },
+          ],
         },
         tenis: {
           src: "/pdf-template-tenis.png",
-          BL: [289, 291], BR: [769, 296], FR: [941, 707], FL: [249, 712],
-          NET_TOP_L: [277, 418], NET_TOP_R: [820, 418],
-          NET_BASE_L: [272, 470], NET_BASE_R: [842, 470],
+          netV: 0.5,
+          zones: [
+            { vFrom: 0,   vTo: 0.5, L0: [352, 301], R0: [700, 300], L1: [299, 466], R1: [752, 465] },
+            { vFrom: 0.5, vTo: 1,   L0: [299, 466], R0: [752, 465], L1: [225, 713], R1: [824, 712] },
+          ],
         },
       };
       const tpl = TEMPLATES[isTenis ? "tenis" : "padel"];
@@ -992,7 +998,6 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
       const tplH = tplW * tplAspect;
       doc.addImage(templateImg, "PNG", 0, 0, tplW, tplH);
 
-      const { BL, BR, FR, FL, NET_TOP_L, NET_TOP_R, NET_BASE_L, NET_BASE_R } = tpl;
       const computeHomography = (dst) => {
         const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = dst;
         const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
@@ -1012,19 +1017,17 @@ function ProjectScreen({ project, plan, coachName, onExportBlocked, tool, setToo
         };
       };
 
-      const backMap = computeHomography([BL, BR, NET_TOP_R, NET_TOP_L]);
-      const frontMap = computeHomography([NET_BASE_L, NET_BASE_R, FR, FL]);
-      const mapPt = (u, v) => (v < 0.5 ? backMap(u, v / 0.5) : frontMap(u, (v - 0.5) / 0.5));
-
-      const mapSegment = (x1, y1, x2, y2) => {
-        if ((y1 < 0.5) === (y2 < 0.5)) return [[mapPt(x1, y1), mapPt(x2, y2)]];
-        const t = (0.5 - y1) / (y2 - y1);
-        const xCross = x1 + (x2 - x1) * t;
-        const pBack = backMap(xCross, 1);
-        const pFront = frontMap(xCross, 0);
-        if (y1 < 0.5) return [[mapPt(x1, y1), pBack], [pFront, mapPt(x2, y2)]];
-        return [[mapPt(x1, y1), pFront], [pBack, mapPt(x2, y2)]];
+      const zones = tpl.zones.map(z => ({ ...z, map: computeHomography([z.L0, z.R0, z.R1, z.L1]) }));
+      const zoneFor = (v) => zones.find(z => v < z.vTo) || zones[zones.length - 1];
+      const mapPt = (u, v) => {
+        const z = zoneFor(v);
+        return z.map(u, (v - z.vFrom) / (z.vTo - z.vFrom));
       };
+
+      // Mapeo unificado, rectilíneo y continuo para los dos deportes:
+      // al haber varias zonas que encajan exactamente en sus bordes,
+      // ninguna línea necesita partirse al cruzar la red.
+      const mapSegment = (x1, y1, x2, y2) => [[mapPt(x1, y1), mapPt(x2, y2)]];
 
       const ovCanvas = document.createElement("canvas");
       ovCanvas.width = templateImg.width; ovCanvas.height = templateImg.height;
