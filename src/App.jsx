@@ -15,6 +15,15 @@ const FREE_MAX_FOLDERS = 2;
 const FREE_MAX_PROJECTS_PER_FOLDER = 3;
 const TERMS_VERSION = "2026-09-28"; // debe coincidir con la fecha de /legal/terminos.html
 
+async function friendlyError(res, fallback) {
+  try {
+    const body = await res.json();
+    return body?.message || body?.error_description || body?.error || fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
 function makeSupabase(url, key) {
   let accessToken = null;
   let refreshToken = null;
@@ -86,7 +95,7 @@ function makeSupabase(url, key) {
 
     async select(table, query = "") {
       const res = await fetch(`${url}/rest/v1/${table}?${query}`, { headers: authHeaders() });
-      if (!res.ok) throw new Error(`Error leyendo ${table}`);
+      if (!res.ok) throw new Error(await friendlyError(res, `Error leyendo ${table}`));
       return res.json();
     },
     async insert(table, payload) {
@@ -95,7 +104,7 @@ function makeSupabase(url, key) {
         headers: { ...authHeaders(), Prefer: "return=representation" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`Error creando en ${table}`);
+      if (!res.ok) throw new Error(await friendlyError(res, `Error creando en ${table}`));
       return res.json();
     },
     async update(table, id, payload) {
@@ -104,12 +113,12 @@ function makeSupabase(url, key) {
         headers: { ...authHeaders(), Prefer: "return=representation" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`Error actualizando ${table}`);
+      if (!res.ok) throw new Error(await friendlyError(res, `Error actualizando ${table}`));
       return res.json();
     },
     async remove(table, id) {
       const res = await fetch(`${url}/rest/v1/${table}?id=eq.${id}`, { method: "DELETE", headers: authHeaders() });
-      if (!res.ok) throw new Error(`Error eliminando en ${table}`);
+      if (!res.ok) throw new Error(await friendlyError(res, `Error eliminando en ${table}`));
       return true;
     },
     async rpc(fn, params = {}) {
@@ -118,7 +127,7 @@ function makeSupabase(url, key) {
         headers: authHeaders(),
         body: JSON.stringify(params),
       });
-      if (!res.ok) throw new Error(`Error llamando a ${fn}`);
+      if (!res.ok) throw new Error(await friendlyError(res, `Error llamando a ${fn}`));
       try { return await res.json(); } catch (e) { return null; }
     },
   };
