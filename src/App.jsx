@@ -107,6 +107,18 @@ function makeSupabase(url, key) {
       if (!res.ok) throw new Error(await friendlyError(res, `Error creando en ${table}`));
       return res.json();
     },
+    // Para tablas de solo-escritura (como consent_log), donde el usuario no
+    // tiene permiso de LECTURA a propósito. Pedir la fila de vuelta daría
+    // "permission denied", así que aquí no se pide.
+    async insertMinimal(table, payload) {
+      const res = await fetch(`${url}/rest/v1/${table}`, {
+        method: "POST",
+        headers: { ...authHeaders(), Prefer: "return=minimal" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await friendlyError(res, `Error creando en ${table}`));
+      return true;
+    },
     async update(table, id, payload) {
       const res = await fetch(`${url}/rest/v1/${table}?id=eq.${id}`, {
         method: "PATCH",
@@ -263,7 +275,7 @@ export default function App() {
     setAuthBusy(true);
     try {
       // Registro del consentimiento ANTES de enviar el enlace (tabla consent_log).
-      await sb.insert("consent_log", {
+      await sb.insertMinimal("consent_log", {
         email: email.trim().toLowerCase(),
         terms_version: TERMS_VERSION,
         terms_accepted: acceptedPrivacy && acceptedTerms,
