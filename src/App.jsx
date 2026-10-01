@@ -162,6 +162,9 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [linkSentTo, setLinkSentTo] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState("");
 
   // ESTADOS PARA EL CUMPLIMIENTO LEGAL
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
@@ -225,6 +228,30 @@ export default function App() {
       setAuthState("signedOut");
     })();
   }, []);
+
+  const verifyCode = async () => {
+    const code = otpCode.trim();
+    if (!code) return;
+    setOtpBusy(true); setOtpError("");
+    try {
+      const data = await sb.verifyOtp(linkSentTo, code);
+      if (data?.access_token && data?.refresh_token) {
+        sb.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
+        sessionStore.set(data.refresh_token);
+        const u = await sb.getUser();
+        if (u && !u.error) {
+          setUser(u);
+          setAuthState("signedIn");
+          return;
+        }
+      }
+      setOtpError("Código incorrecto o caducado.");
+    } catch (e) {
+      setOtpError(e.message || "Código incorrecto o caducado.");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (authState !== "signedIn") return;
@@ -487,8 +514,27 @@ export default function App() {
               <p className="text-xs text-slate-500 text-center mb-4">
                 Abre tu correo <strong>desde este mismo dispositivo</strong> y pulsa el enlace para entrar. Revisa también la carpeta de spam.
               </p>
+
+              <div className="border-t border-slate-100 pt-4 mb-4">
+                <p className="text-xs text-slate-500 text-center mb-3">
+                  ¿El enlace no te abre la app (por ejemplo en iPhone)? Escribe el código de 6 dígitos que también trae el correo:
+                </p>
+                <input
+                  type="text" inputMode="numeric" maxLength={6} placeholder="000000"
+                  value={otpCode}
+                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="w-full text-center tracking-[0.5em] text-lg font-semibold border border-slate-200 rounded-lg px-3 py-2.5 mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+                {otpError && <p className="text-xs text-red-500 text-center mb-2">{otpError}</p>}
+                <button onClick={verifyCode} disabled={otpBusy || otpCode.length < 6}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2">
+                  {otpBusy ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Entrar con el código
+                </button>
+              </div>
+
               <button
-                onClick={() => { setAuthState("signedOut"); setAuthError(""); setEmail(""); setName(""); }}
+                onClick={() => { setAuthState("signedOut"); setAuthError(""); setEmail(""); setName(""); setOtpCode(""); setOtpError(""); }}
                 className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-lg"
               >
                 Usar otro email
