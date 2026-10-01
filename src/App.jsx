@@ -191,6 +191,16 @@ export default function App() {
   const plan = subscription?.plan === "premium" || trialActive ? "premium" : "free";
   const trialJustEnded = subscription && subscription.plan !== "premium" && trialEndsAt && !trialActive;
 
+  // En cuanto se detecta que la prueba acaba de terminar, se muestra la
+  // pantalla completa una vez por sesión (no cada vez que se repinta).
+  const shownTrialEndRef = useRef(false);
+  useEffect(() => {
+    if (trialJustEnded && !shownTrialEndRef.current && dataLoaded && !modal) {
+      shownTrialEndRef.current = true;
+      setModal({ type: "upgrade", reason: "trialEnded" });
+    }
+  }, [trialJustEnded, dataLoaded]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -729,29 +739,76 @@ function DeleteAccountModal({ userEmail, onConfirm, onCancel }) {
 }
 
 function UpgradeModal({ reason, onCancel }) {
-  const text = reason === "folders"
-    ? `Tu plan gratuito permite hasta ${FREE_MAX_FOLDERS} carpetas. Pásate a premium para crear carpetas sin límite.`
+  const [canClose, setCanClose] = useState(false);
+  const [clicked, setClicked] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setCanClose(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const headline = reason === "folders"
+    ? "Has llegado al límite de carpetas gratis"
     : reason === "projects"
-    ? `Tu plan gratuito permite hasta ${FREE_MAX_PROJECTS_PER_FOLDER} entrenos por carpeta. Pásate a premium para crear entrenos sin límite.`
+    ? "Has llegado al límite de entrenos gratis"
     : reason === "locked"
-    ? `Esta carpeta se creó durante tu prueba Premium. Hazte premium para volver a acceder a ella.`
-    : `Exportar a PDF es una función premium. Pásate a premium para descargar tus pizarras en PDF.`;
+    ? "Tu prueba Premium ha terminado"
+    : reason === "pdf"
+    ? "Exportar a PDF es cosa de Premium"
+    : "Tu prueba Premium ha terminado";
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm">
-        <h3 className="text-base font-bold text-slate-800 mb-2">Has llegado al límite del plan gratuito</h3>
-        <p className="text-sm text-slate-600 mb-5">{text}</p>
-        <div className="flex gap-2">
-          <button onClick={onCancel} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-lg">
-            Ahora no
-          </button>
-          <button
-            onClick={() => { onCancel(); }}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium py-2.5 rounded-lg"
-          >
-            Hazte premium
-          </button>
+    <div className="fixed inset-0 z-50 overflow-y-auto"
+      style={{ background: "radial-gradient(circle at 70% 20%, #16325c 0%, #0b1a33 55%, #050c1c 100%)" }}>
+
+      {canClose && (
+        <button onClick={onCancel} aria-label="Cerrar"
+          className="fixed top-4 right-4 z-10 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center backdrop-blur-sm">
+          <X size={16} />
+        </button>
+      )}
+
+      <div className="min-h-full flex flex-col items-center justify-center px-6 py-14 text-center">
+        <div className="flex items-center gap-1 mb-8">
+          <div className="w-9 h-9 rounded-full bg-lime-300 flex items-center justify-center">
+            <Crown size={16} className="text-[#0b1a33]" fill="currentColor" />
+          </div>
+          <span className="text-2xl font-extrabold text-white tracking-tight">edel</span>
         </div>
+
+        <h1 className="text-white text-2xl font-extrabold leading-snug max-w-xs mb-2">{headline}</h1>
+        <p className="text-lime-300 text-xl font-extrabold leading-snug max-w-xs mb-6">
+          ¿Listo para entrenar sin límites?
+        </p>
+
+        <p className="text-white/70 text-sm max-w-xs mb-8 leading-relaxed">
+          Por menos de lo que te dejas un día en pelotas o en 2 cafés, llevas tu entrenamiento al siguiente nivel.
+        </p>
+
+        <div className="rounded-2xl px-8 py-5 mb-3" style={{ background: "#0e2347", border: "1px solid rgba(212,255,77,0.4)" }}>
+          <p className="text-white text-3xl font-extrabold">3,25 €<span className="text-base font-medium text-white/60"> /mes</span></p>
+          <p className="text-white/50 text-xs mt-1">en el plan anual, 39 € al año</p>
+        </div>
+        <p className="text-white/50 text-xs mb-8">o 4,99 €/mes si lo prefieres mes a mes</p>
+
+        <button
+          onClick={() => setClicked(true)}
+          className="w-full max-w-xs bg-lime-300 hover:bg-lime-200 text-[#0b1a33] font-bold text-base py-3.5 rounded-full flex items-center justify-center gap-2 mb-3 transition-colors"
+        >
+          <Crown size={18} fill="currentColor" /> Hazte Premium →
+        </button>
+        {clicked && (
+          <p className="text-lime-300 text-xs mb-3">Muy pronto podrás pagar desde aquí 🎾 Estamos a punto de activarlo.</p>
+        )}
+
+        <div className="flex items-center gap-6 mt-6 text-white/70 text-xs max-w-xs">
+          <span className="flex items-center gap-1.5"><Check size={13} className="text-lime-300" /> Todo desbloqueado</span>
+          <span className="flex items-center gap-1.5"><Check size={13} className="text-lime-300" /> Sin límites</span>
+        </div>
+
+        {!canClose && (
+          <p className="text-white/30 text-[11px] mt-10">Tu entrenamiento, sin límites.</p>
+        )}
       </div>
     </div>
   );
