@@ -747,67 +747,38 @@ function UpgradeModal({ reason, onCancel }) {
     return () => clearTimeout(t);
   }, []);
 
-  const headline = reason === "folders"
-    ? "Has llegado al límite de carpetas gratis"
-    : reason === "projects"
-    ? "Has llegado al límite de entrenos gratis"
-    : reason === "locked"
-    ? "Tu prueba Premium ha terminado"
-    : reason === "pdf"
-    ? "Exportar a PDF es cosa de Premium"
-    : "Tu prueba Premium ha terminado";
-
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto"
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto"
       style={{ background: "radial-gradient(circle at 70% 20%, #16325c 0%, #0b1a33 55%, #050c1c 100%)" }}>
 
       {canClose && (
         <button onClick={onCancel} aria-label="Cerrar"
-          className="fixed top-4 right-4 z-10 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center backdrop-blur-sm">
+          className="fixed top-4 right-4 z-10 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 text-white/80 hover:text-white flex items-center justify-center backdrop-blur-sm">
           <X size={16} />
         </button>
       )}
 
-      <div className="min-h-full flex flex-col items-center justify-center px-6 py-14 text-center">
-        <div className="flex items-center gap-1 mb-8">
-          <div className="w-9 h-9 rounded-full bg-lime-300 flex items-center justify-center">
-            <Crown size={16} className="text-[#0b1a33]" fill="currentColor" />
-          </div>
-          <span className="text-2xl font-extrabold text-white tracking-tight">edel</span>
-        </div>
+      {/* Contenedor con la proporción exacta de la imagen (1024x1536), para
+          que el botón invisible de abajo caiga siempre en el sitio correcto
+          de la foto, se vea del tamaño que se vea en cada pantalla. */}
+      <div className="relative w-full h-full max-w-md mx-auto" style={{ aspectRatio: "1024 / 1536", maxHeight: "100vh" }}>
+        <img src="/premium-promo.jpg" alt="Hazte Premium en Tedel"
+          className="w-full h-full object-contain select-none" draggable={false} />
 
-        <h1 className="text-white text-2xl font-extrabold leading-snug max-w-xs mb-2">{headline}</h1>
-        <p className="text-lime-300 text-xl font-extrabold leading-snug max-w-xs mb-6">
-          ¿Listo para entrenar sin límites?
-        </p>
-
-        <p className="text-white/70 text-sm max-w-xs mb-8 leading-relaxed">
-          Por menos de lo que te dejas un día en pelotas o en 2 cafés, llevas tu entrenamiento al siguiente nivel.
-        </p>
-
-        <div className="rounded-2xl px-8 py-5 mb-3" style={{ background: "#0e2347", border: "1px solid rgba(212,255,77,0.4)" }}>
-          <p className="text-white text-3xl font-extrabold">3,25 €<span className="text-base font-medium text-white/60"> /mes</span></p>
-          <p className="text-white/50 text-xs mt-1">en el plan anual, 39 € al año</p>
-        </div>
-        <p className="text-white/50 text-xs mb-8">o 4,99 €/mes si lo prefieres mes a mes</p>
-
+        {/* Botón real, invisible, exactamente sobre "Hazte Premium" de la foto */}
         <button
           onClick={() => setClicked(true)}
-          className="w-full max-w-xs bg-lime-300 hover:bg-lime-200 text-[#0b1a33] font-bold text-base py-3.5 rounded-full flex items-center justify-center gap-2 mb-3 transition-colors"
-        >
-          <Crown size={18} fill="currentColor" /> Hazte Premium →
-        </button>
+          aria-label="Hazte Premium"
+          style={{ position: "absolute", left: "9.4%", top: "74.9%", width: "55%", height: "6.5%" }}
+          className="active:scale-[0.98] transition-transform"
+        />
+
         {clicked && (
-          <p className="text-lime-300 text-xs mb-3">Muy pronto podrás pagar desde aquí 🎾 Estamos a punto de activarlo.</p>
-        )}
-
-        <div className="flex items-center gap-6 mt-6 text-white/70 text-xs max-w-xs">
-          <span className="flex items-center gap-1.5"><Check size={13} className="text-lime-300" /> Todo desbloqueado</span>
-          <span className="flex items-center gap-1.5"><Check size={13} className="text-lime-300" /> Sin límites</span>
-        </div>
-
-        {!canClose && (
-          <p className="text-white/30 text-[11px] mt-10">Tu entrenamiento, sin límites.</p>
+          <div style={{ position: "absolute", left: "5%", top: "82%", width: "90%" }} className="text-center">
+            <p className="text-lime-300 text-xs font-medium drop-shadow">
+              Muy pronto podrás pagar desde aquí 🎾 Estamos a punto de activarlo.
+            </p>
+          </div>
         )}
       </div>
     </div>
