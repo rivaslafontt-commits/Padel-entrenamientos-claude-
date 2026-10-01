@@ -520,13 +520,13 @@ export default function App() {
                   ¿El enlace no te abre la app (por ejemplo en iPhone)? Escribe el código de 6 dígitos que también trae el correo:
                 </p>
                 <input
-                  type="text" inputMode="numeric" maxLength={6} placeholder="000000"
+                  type="text" inputMode="numeric" maxLength={8} placeholder="00000000"
                   value={otpCode}
-                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                   className="w-full text-center tracking-[0.5em] text-lg font-semibold border border-slate-200 rounded-lg px-3 py-2.5 mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-300"
                 />
                 {otpError && <p className="text-xs text-red-500 text-center mb-2">{otpError}</p>}
-                <button onClick={verifyCode} disabled={otpBusy || otpCode.length < 6}
+                <button onClick={verifyCode} disabled={otpBusy || otpCode.length < 8}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2">
                   {otpBusy ? <Loader2 size={16} className="animate-spin" /> : null}
                   Entrar con el código
